@@ -2,7 +2,7 @@
 @implements IAsyncDisposable
 
 <div class="chart-wrap">
-    <canvas id="@_id"></canvas>
+    <canvas @ref="_canvas"></canvas>
 </div>
 
 @code {
@@ -10,17 +10,13 @@
     [Parameter] public string Type { get; set; } = "bar";
     [Parameter] public string Title { get; set; } = "";
 
-    private readonly string _id = "chart-" + Guid.NewGuid().ToString("N");
-    private QueryResult? _last;
-    private string? _lastType;
+    private ElementReference _canvas;
+    private string _chartId = "chart-" + Guid.NewGuid().ToString("N");
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (Result == null || Result.Columns.Count < 1 || Result.Rows.Count == 0) return;
-        if (_last == Result && _lastType == Type) return;
-        _last = Result;
-        _lastType = Type;
-
+        
         string[] labels;
         double[] values;
 
@@ -37,7 +33,7 @@
 
         try
         {
-            await JS.InvokeVoidAsync("driveeCharts.render", _id, Type, labels, values, Title);
+            await JS.InvokeVoidAsync("driveeCharts.render", _chartId, Type, labels, values, Title);
         }
         catch (JSException) { }
     }
@@ -55,6 +51,6 @@
 
     public async ValueTask DisposeAsync()
     {
-        try { await JS.InvokeVoidAsync("driveeCharts.destroy", _id); } catch { }
+        try { await JS.InvokeVoidAsync("driveeCharts.destroy", _chartId); } catch { }
     }
 }

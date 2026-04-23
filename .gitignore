@@ -267,3 +267,43 @@ DerivedData/
 # === Node.js / фронтенд-утилиты ===
 node_modules/
 npm-debug.log*
+# === .NET / Rider / VS ===
+**/[Bb]in/
+**/[Oo]bj/
+*.dll
+*.pdb
+*.exe
+*.userprefs
+*.suo
+*.cache
+*.sln.DotSettings.user
+*.csproj.user
+.idea/
+.vs/
+*.swp
+*.swo
+rider.project.*.info
+
+# === Blazor / wwwroot ===
+wwwroot/lib/
+wwwroot/_framework/
+wwwroot/_content/
+
+# === Базы данных (НИКОГДА не коммитить!) ===
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.mdf
+*.ldf
+
+# === Логи и временные файлы ===
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# === Node.js ===
+node_modules/
+npm-debug.log*

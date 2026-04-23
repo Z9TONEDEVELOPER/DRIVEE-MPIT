@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Components.Web
 <!DOCTYPE html>
 <html lang="en">
 
@@ -5,21 +6,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <ResourcePreloader />
-    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
-    <link rel="stylesheet" href="@Assets["app.css"]" />
-    <link rel="stylesheet" href="@Assets["DriveeDataSpace.Web.styles.css"]" />
-    <ImportMap />
-    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="DriveeDataSpace.Web.styles.css" />
     <HeadOutlet />
+    <link rel="icon" type="image/png" href="favicon.png" />
 </head>
 
 <body>
     <Routes />
     <ReconnectModal />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="@Assets["js/chart-interop.js"]"></script>
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="js/chart-interop.js"></script>
+    <script src="_framework/blazor.web.js"></script>
 </body>
 
 </html>
