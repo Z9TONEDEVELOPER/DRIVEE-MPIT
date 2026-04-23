@@ -1,32 +1,87 @@
 using System.Text.Json.Serialization;
-using System.Collections.Generic;
-using CommunityToolkit.Mvvm.ComponentModel;
-using System;
-using ScottPlot;
-namespace DriveeDataSpace.Desktop.Models;
 
+namespace DriveeDataSpace.DriveeDataSpace.Desktop.Models;
+
+// ── Запрос ──────────────────────────────────────────────────────────────────
 public record QueryRequest(string Text);
 
-public record QueryResponse
+// ── Intent (совпадает с Web QueryIntent) ─────────────────────────────────────
+public class QueryIntent
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString();
-    public QueryIntentDto Intent { get; init; } = null!;
-    public string FinalSql { get; init; } = string.Empty;
-    public List<Dictionary<string, object>> ResultTable { get; init; } = new();
-    public ExplainDto Explain { get; init; } = null!;
-    public string VisualizationHint { get; init; } = "bar";
-    public ScottPlot.Plot? PlotModel { get; set; } = new();
+    [JsonPropertyName("kind")]               public string Kind              { get; set; } = "query";
+    [JsonPropertyName("reply")]              public string? Reply             { get; set; }
+    [JsonPropertyName("intent")]             public string Intent             { get; set; } = "aggregate";
+    [JsonPropertyName("metric")]             public string Metric             { get; set; } = "orders";
+    [JsonPropertyName("group_by")]           public string? GroupBy           { get; set; }
+    [JsonPropertyName("period")]             public string? Period            { get; set; }
+    [JsonPropertyName("periods")]            public List<string>? Periods     { get; set; }
+    [JsonPropertyName("filters")]            public Dictionary<string, string>? Filters { get; set; }
+    [JsonPropertyName("visualization_hint")] public string VisualizationHint  { get; set; } = "table";
+    [JsonPropertyName("confidence")]         public double Confidence          { get; set; } = 0.5;
+    [JsonPropertyName("explanation")]        public string? Explanation        { get; set; }
 }
 
-public record QueryIntentDto(
-    string Intent,
-    string Metric,
-    string Aggregation,
-    string[]? Periods,
-    double Confidence,
-    string? GroupBy = null);
+// ── Результат запроса ────────────────────────────────────────────────────────
+public class QueryResult
+{
+    [JsonPropertyName("columns")]    public List<string> Columns          { get; set; } = new();
+    [JsonPropertyName("rows")]       public List<List<object?>> Rows      { get; set; } = new();
+    [JsonPropertyName("rowCount")]   public int RowCount                  => Rows.Count;
+    [JsonPropertyName("durationMs")] public long DurationMs               { get; set; }
+}
 
-public record ExplainDto(
-    string BusinessExplanation,
-    string TechnicalExplanation,
-    string TemplateUsed);
+// ── Шаг объяснения ───────────────────────────────────────────────────────────
+public class ReasoningStep
+{
+    [JsonPropertyName("icon")]   public string Icon   { get; set; } = "";
+    [JsonPropertyName("title")]  public string Title  { get; set; } = "";
+    [JsonPropertyName("detail")] public string Detail { get; set; } = "";
+    [JsonPropertyName("code")]   public string? Code  { get; set; }
+}
+
+// ── Полный ответ pipeline ─────────────────────────────────────────────────────
+public class PipelineResult
+{
+    [JsonPropertyName("userQuery")]       public string UserQuery            { get; set; } = "";
+    [JsonPropertyName("intent")]          public QueryIntent? Intent         { get; set; }
+    [JsonPropertyName("sql")]             public string? Sql                 { get; set; }
+    [JsonPropertyName("result")]          public QueryResult? Result         { get; set; }
+    [JsonPropertyName("explain")]         public string? Explain             { get; set; }
+    [JsonPropertyName("technicalExplain")]public string? TechnicalExplain   { get; set; }
+    [JsonPropertyName("error")]           public string? Error               { get; set; }
+    [JsonPropertyName("visualization")]   public string Visualization        { get; set; } = "table";
+    [JsonPropertyName("confidence")]      public double Confidence           { get; set; }
+    [JsonPropertyName("warnings")]        public List<string> Warnings       { get; set; } = new();
+    [JsonPropertyName("isChat")]          public bool IsChat                 { get; set; }
+    [JsonPropertyName("chatReply")]       public string? ChatReply           { get; set; }
+    [JsonPropertyName("reasoningTrail")]  public List<ReasoningStep> ReasoningTrail { get; set; } = new();
+}
+
+// ── Отчёт ────────────────────────────────────────────────────────────────────
+public class Report
+{
+    [JsonPropertyName("id")]            public int Id            { get; set; }
+    [JsonPropertyName("name")]          public string Name       { get; set; } = "";
+    [JsonPropertyName("userQuery")]     public string UserQuery  { get; set; } = "";
+    [JsonPropertyName("intentJson")]    public string IntentJson { get; set; } = "";
+    [JsonPropertyName("sql")]           public string Sql        { get; set; } = "";
+    [JsonPropertyName("visualization")] public string Visualization { get; set; } = "table";
+    [JsonPropertyName("author")]        public string Author     { get; set; } = "demo";
+    [JsonPropertyName("createdAt")]     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ── Сообщение чата ────────────────────────────────────────────────────────────
+public enum ChatRole { User, Bot, Result }
+
+public class ChatMessage
+{
+    public string Id            { get; } = Guid.NewGuid().ToString("N");
+    public ChatRole Role        { get; set; }
+    public string? Text         { get; set; }
+    public PipelineResult? Result { get; set; }
+    public string Visualization { get; set; } = "table";
+    public string ReportName    { get; set; } = "";
+    public string? SavedAs      { get; set; }
+    public string? InsightTab   { get; set; }  // "reasoning" | "sql" | null
+    public bool DetailsOpen     { get; set; }
+}

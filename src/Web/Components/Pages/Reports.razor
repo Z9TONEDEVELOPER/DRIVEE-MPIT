@@ -1,6 +1,8 @@
 @page "/reports"
 @rendermode InteractiveServer
-@inject ReportService ReportsSvc
+@using DriveeDataSpace.Web.Models
+@using Microsoft.AspNetCore.Components
+@inject DriveeDataSpace.Web.Services.ReportService ReportsSvc
 @inject NavigationManager Nav
 
 <PageTitle>Drivee BI · Отчёты</PageTitle>
@@ -91,7 +93,7 @@
 </div>
 
 @code {
-    private List<Report> _items = new();
+    private List<DriveeDataSpace.Web.Models.Report> _items = new();
 
     protected override void OnInitialized() => Load();
 

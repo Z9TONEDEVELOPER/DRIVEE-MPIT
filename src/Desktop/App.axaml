@@ -2,18 +2,203 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="DriveeDataSpace.Desktop.App"
              xmlns:local="using:DriveeDataSpace.Desktop"
-             xmlns:localConverters="using:DriveeDataSpace.Desktop.Converters"
-             RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+             xmlns:desktop="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop"
+             RequestedThemeVariant="Light">
 
     <Application.DataTemplates>
-        <local:ViewLocator/>
+        <desktop:ViewLocator/>
     </Application.DataTemplates>
-  
+
     <Application.Styles>
         <FluentTheme />
+
+        <!-- ════════════════════════════════════════════════════
+             DRIVEE BI — GLOBAL STYLES
+             Цвета совпадают с Web app.css
+             ════════════════════════════════════════════════════ -->
+        <Style Selector="Window">
+            <Setter Property="Background" Value="#f7f8fb"/>
+            <Setter Property="FontFamily" Value="Segoe UI, Arial, sans-serif"/>
+        </Style>
+
+        <!-- ── Кнопка сброса стиля ─────────────────────────────── -->
+        <Style Selector="Button.flat">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- ── Основная индиго-кнопка ─────────────────────────── -->
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4338ca"/>
+        </Style>
+        <Style Selector="Button.primary:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="#cbd5e1"/>
+        </Style>
+
+        <!-- ── Ghost-кнопка ────────────────────────────────────── -->
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="#f1f5f9"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#e5e7eb"/>
+        </Style>
+
+        <!-- ── Зелёная кнопка сохранения ──────────────────────── -->
+        <Style Selector="Button.save">
+            <Setter Property="Background" Value="#10b981"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.save:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#059669"/>
+        </Style>
+
+        <!-- ── Send-кнопка чата ────────────────────────────────── -->
+        <Style Selector="Button.send">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Width" Value="38"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.send:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4338ca"/>
+        </Style>
+        <Style Selector="Button.send:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="#cbd5e1"/>
+        </Style>
+
+        <!-- ── Шаблон-кнопка в сайдбаре ──────────────────────── -->
+        <Style Selector="Button.template-btn">
+            <Setter Property="Background" Value="#1e293b"/>
+            <Setter Property="Foreground" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.template-btn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#334155"/>
+        </Style>
+
+        <!-- ── Навигация в сайдбаре ───────────────────────────── -->
+        <Style Selector="Button.nav-link">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#cbd5e1"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12,9"/>
+            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.nav-link:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1e293b"/>
+        </Style>
+        <Style Selector="Button.nav-link.active /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2d3a57"/>
+        </Style>
+
+        <!-- ── Кнопка отчёта в сайдбаре ──────────────────────── -->
+        <Style Selector="Button.report-link">
+            <Setter Property="Background" Value="#1e293b"/>
+            <Setter Property="Foreground" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- ── Таб визуализации ───────────────────────────────── -->
+        <Style Selector="Button.viz-tab">
+            <Setter Property="Background" Value="#f1f5f9"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.viz-tab.active /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="TextElement.Foreground" Value="White"/>
+        </Style>
+
+        <!-- ── Insight-таб (reasoning/sql) ───────────────────── -->
+        <Style Selector="Button.insight-tab">
+            <Setter Property="Background" Value="#f8fafc"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#dbe4f0"/>
+            <Setter Property="CornerRadius" Value="999"/>
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.insight-tab.active /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4338ca"/>
+            <Setter Property="TextElement.Foreground" Value="White"/>
+        </Style>
+
+        <!-- ── TextBox стили ──────────────────────────────────── -->
+        <Style Selector="TextBox.chat-input">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="AcceptsReturn" Value="True"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style Selector="TextBox.chat-input:focus /template/ Border">
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="TextBox.report-name-input">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#d1d5db"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <!-- ── ScrollViewer ──────────────────────────────────── -->
+        <Style Selector="ScrollViewer">
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+        </Style>
     </Application.Styles>
-    <Application.Resources>
-        <localConverters:BoolToProgressValueConverter x:Key="BoolToProgressValue" />
-    </Application.Resources>
 </Application>

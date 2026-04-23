@@ -1,4 +1,4 @@
-﻿namespace DriveeDataSpace.Core;
+﻿namespace DriveeDataSpace.DriveeDataSpace.Core;
 
 public class Class1
 {

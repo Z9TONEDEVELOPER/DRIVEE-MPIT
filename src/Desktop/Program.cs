@@ -1,7 +1,6 @@
 ﻿using Avalonia;
-using System;
-
-namespace DriveeDataSpace.Desktop;
+using DriveeDataSpace.Desktop;
+namespace DriveeDataSpace.DriveeDataSpace.Desktop;
 
 sealed class Program
 {

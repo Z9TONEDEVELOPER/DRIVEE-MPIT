@@ -1,0 +1,290 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:DriveeDataSpace.DriveeDataSpace.Desktop"
+             xmlns:models="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop.Models"
+             xmlns:views1="clr-namespace:DriveeDataSpace.Desktop.Views"
+             x:Class="DriveeDataSpace.Desktop.Views.ChatMessageView"
+             x:DataType="models:ChatMessage">
+
+    <UserControl.Resources>
+        <!-- Конвертеры объявляются в code-behind через x:Static -->
+    </UserControl.Resources>
+
+    <!-- Контейнер сообщения -->
+    <Grid Margin="28,0" MaxWidth="960">
+
+        <!-- USER bubble (справа) -->
+        <Border HorizontalAlignment="Right"
+                Background="#4f46e5"
+                CornerRadius="14,14,4,14"
+                Padding="14,10"
+                MaxWidth="680"
+                IsVisible="{Binding Role, Converter={x:Static views1:Converters.IsUserRoleConverter}}">
+            <TextBlock Text="{Binding Text}"
+                       Foreground="White"
+                       FontSize="14"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- BOT text bubble (слева) -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="10"
+                    IsVisible="{Binding Role, Converter={x:Static views1:Converters.IsBotRoleConverter}}">
+            <!-- Avatar -->
+            <Border Background="#4f46e5"
+                    CornerRadius="8"
+                    Width="32" Height="32"
+                    VerticalAlignment="Top">
+                <TextBlock Text="◆"
+                           Foreground="White"
+                           FontSize="13"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+            </Border>
+            <Border Background="White"
+                    BorderBrush="#e5e7eb"
+                    BorderThickness="1"
+                    CornerRadius="4,14,14,14"
+                    Padding="14,10"
+                    MaxWidth="640">
+                <TextBlock Text="{Binding Text}"
+                           Foreground="#1f2937"
+                           FontSize="14"
+                           TextWrapping="Wrap"/>
+            </Border>
+        </StackPanel>
+
+        <!-- RESULT bubble (слева, широкий) -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="10"
+                    IsVisible="{Binding Role, Converter={x:Static views1:Converters.IsResultRoleConverter}}">
+            <!-- Avatar -->
+            <Border Background="#4f46e5"
+                    CornerRadius="8"
+                    Width="32" Height="32"
+                    VerticalAlignment="Top">
+                <TextBlock Text="◆"
+                           Foreground="White"
+                           FontSize="13"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+            </Border>
+
+            <!-- Result card -->
+            <Border Background="White"
+                    BorderBrush="#e5e7eb"
+                    BorderThickness="1"
+                    CornerRadius="4,14,14,14"
+                    MaxWidth="820"
+                    MinWidth="400">
+                <StackPanel>
+
+                    <!-- ── Error ─────────────────────────────────── -->
+                    <Border Background="#fef2f2"
+                            BorderBrush="#fecaca"
+                            BorderThickness="1"
+                            CornerRadius="4,14,0,0"
+                            Padding="14,12"
+                            IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNotNullConverter}}">
+                        <TextBlock Text="{Binding Result.Error}"
+                                   Foreground="#991b1b"
+                                   FontSize="13"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+
+                    <!-- ── Explain + meta ────────────────────────── -->
+                    <StackPanel Margin="16,14,16,10"
+                                IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNullConverter}}">
+                        <TextBlock Text="{Binding Result.Explain}"
+                                   FontSize="14"
+                                   FontWeight="Medium"
+                                   Foreground="#1f2937"
+                                   TextWrapping="Wrap"/>
+
+                        <!-- Warnings -->
+                        <ItemsControl ItemsSource="{Binding Result.Warnings}" Margin="0,6,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#fffbeb"
+                                            CornerRadius="6"
+                                            Padding="8,5"
+                                            Margin="0,2">
+                                        <TextBlock Text="{Binding}"
+                                                   Foreground="#92400e"
+                                                   FontSize="12.5"
+                                                   TextWrapping="Wrap"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Meta row: confidence + stats -->
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,10,0,0">
+                            <Border CornerRadius="12"
+                                    Padding="8,4"
+                                    Background="{Binding Result.Confidence, Converter={x:Static views1:Converters.ConfidenceBgConverter}}"
+                                    BorderThickness="1"
+                                    BorderBrush="{Binding Result.Confidence, Converter={x:Static views1:Converters.ConfidenceBorderConverter}}">
+                                <TextBlock Text="{Binding Result.Confidence, Converter={x:Static views1:Converters.ConfidenceLabelConverter}}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding Result.Confidence, Converter={x:Static views1:Converters.ConfidenceFgConverter}}"/>
+                            </Border>
+                            <TextBlock FontSize="12"
+                                       Foreground="#64748b"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding Result.Result, Converter={x:Static views1:Converters.RowStatsConverter}}"/>
+                        </StackPanel>
+
+                        <!-- Insight tabs: Reasoning / SQL -->
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                            <Button Classes="insight-tab"
+                                    Content="Как я понял запрос"
+                                    Tag="reasoning"
+                                    Click="InsightTab_Click"/>
+                            <Button Classes="insight-tab"
+                                    Content="SQL запрос"
+                                    Tag="sql"
+                                    Click="InsightTab_Click"/>
+                        </StackPanel>
+
+                        <!-- Reasoning Trail -->
+                        <Border Background="#f8f9ff"
+                                BorderBrush="#e0e7ff"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="12,12,12,14"
+                                Margin="0,10,0,0"
+                                x:Name="ReasoningPanel"
+                                IsVisible="False">
+                            <StackPanel>
+                                <TextBlock Text="КАК Я ПОНЯЛ ЗАПРОС"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="#4338ca"
+                                           LetterSpacing="1"
+                                           Margin="0,0,0,10"/>
+                                <ItemsControl ItemsSource="{Binding Result.ReasoningTrail}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:ReasoningStep">
+                                            <StackPanel Margin="0,0,0,10"
+                                                        IsVisible="{Binding Code, Converter={x:Static views1:Converters.IsNullConverter}}">
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontSize="13.5"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#1f2937"/>
+                                                <TextBlock Text="{Binding Detail}"
+                                                           FontSize="13"
+                                                           Foreground="#334155"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,3,0,0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- SQL Panel -->
+                        <Border Background="#f8f9ff"
+                                BorderBrush="#e0e7ff"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="12,12,12,14"
+                                Margin="0,10,0,0"
+                                x:Name="SqlPanel"
+                                IsVisible="False">
+                            <StackPanel>
+                                <TextBlock Text="SQL ЗАПРОС"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="#4338ca"
+                                           LetterSpacing="1"
+                                           Margin="0,0,0,10"/>
+                                <Border Background="#0f172a"
+                                        CornerRadius="6"
+                                        Padding="12">
+                                    <TextBlock Text="{Binding Result.Sql}"
+                                               Foreground="#e2e8f0"
+                                               FontFamily="Consolas,monospace"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"/>
+                                </Border>
+                                <!-- Tech explain toggle -->
+                                <Button Content="Технические детали ▼"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="#4f46e5"
+                                        FontSize="12"
+                                        Padding="0,8,0,0"
+                                        Cursor="Hand"
+                                        Click="TechDetails_Click"/>
+                                <Border x:Name="TechPanel" IsVisible="False" Margin="0,6,0,0">
+                                    <TextBlock Text="{Binding Result.TechnicalExplain}"
+                                               FontFamily="Consolas,monospace"
+                                               FontSize="11.5"
+                                               Foreground="#475569"
+                                               TextWrapping="Wrap"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+
+                    <!-- ── Viz + Table (only when has data) ────── -->
+                    <StackPanel Margin="16,0,16,14"
+                                IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNullConverter}}">
+
+                        <!-- Viz switch tabs -->
+                        <StackPanel Orientation="Horizontal"
+                                    Spacing="4"
+                                    Margin="0,0,0,10"
+                                    IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
+                            <Button Content="bar"   Classes="viz-tab" Tag="bar"   Click="VizTab_Click"/>
+                            <Button Content="line"  Classes="viz-tab" Tag="line"  Click="VizTab_Click"/>
+                            <Button Content="pie"   Classes="viz-tab" Tag="pie"   Click="VizTab_Click"/>
+                            <Button Content="table" Classes="viz-tab" Tag="table" Click="VizTab_Click"/>
+                        </StackPanel>
+
+                        <!-- Chart -->
+                        <views1:ResultChartView x:Name="ChartView"
+                                               Height="280"
+                                               Margin="0,0,0,10"
+                                               IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}"/>
+
+                        <!-- Table (inline details) -->
+                        <Expander Header="Показать таблицу"
+                                  Margin="0,6,0,0"
+                                  IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
+                            <views1:ResultTableView x:Name="TableView"/>
+                        </Expander>
+
+                        <!-- Save row -->
+                        <Grid ColumnDefinitions="*,Auto,Auto"
+                              Margin="0,14,0,0"
+                              IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
+                            <TextBox Grid.Column="0"
+                                     x:Name="ReportNameBox"
+                                     Classes="report-name-input"
+                                     Watermark="Название отчёта"
+                                     Text="{Binding ReportName}"
+                                     IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
+                                     Margin="0,0,8,0"/>
+                            <Button Grid.Column="1"
+                                    Classes="save"
+                                    Content="💾 Сохранить отчёт"
+                                    IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
+                                    Click="SaveReport_Click"/>
+                            <TextBlock Grid.Column="2"
+                                       Foreground="#047857"
+                                       FontSize="12.5"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding SavedAs, StringFormat='✓ Сохранено как {0}'}"
+                                       IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNotNullConverter}}"/>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Grid>
+</UserControl>
