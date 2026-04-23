@@ -147,6 +147,9 @@
 </div>
 
 @code {
+    private const string ReasoningTab = "reasoning";
+    private const string SqlTab = "sql";
+
     private string _query = "";
     private bool _busy;
     private string _thinkingLabel = "Думаю…";
@@ -174,6 +177,7 @@
         public string Visualization { get; set; } = "table";
         public string ReportName { get; set; } = "";
         public string? SavedAs { get; set; }
+        public string? InsightTab { get; set; }
         public bool DetailsOpen { get; set; }
     }
 
@@ -314,6 +318,12 @@
         RefreshReports();
     }
 
+    private void ToggleInsightTab(ChatMsg m, string tab) =>
+        m.InsightTab = string.Equals(m.InsightTab, tab, StringComparison.Ordinal) ? null : tab;
+
+    private static string GetInsightTabClass(ChatMsg m, string tab) =>
+        string.Equals(m.InsightTab, tab, StringComparison.Ordinal) ? "bi-insight-tab active" : "bi-insight-tab";
+
     private static string SuggestName(PipelineResult pr)
     {
         if (pr.Intent == null) return pr.UserQuery;
@@ -339,6 +349,8 @@
     {
         var pr = m.Result!;
         var seq = 0;
+        var hasReasoning = pr.ReasoningTrail.Count > 0;
+        var hasSql = !string.IsNullOrWhiteSpace(pr.Sql);
 
         if (pr.Error != null)
         {
@@ -357,11 +369,11 @@
         builder.AddContent(seq++, pr.Explain);
         builder.CloseElement();
 
-        if (pr.Intent?.Explanation is { Length: > 0 } llmNote)
+        if (pr.Intent?.Explanation is { Length: > 0 } llmNote && string.Equals(m.InsightTab, ReasoningTab, StringComparison.Ordinal))
         {
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-explain-llm");
-            builder.AddContent(seq++, $"LLM: {llmNote}");
+            builder.AddContent(seq++, llmNote);
             builder.CloseElement();
         }
 
@@ -369,7 +381,7 @@
         {
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-warn");
-            builder.AddContent(seq++, $"⚠ {w}");
+            builder.AddContent(seq++, w);
             builder.CloseElement();
         }
 
@@ -391,21 +403,54 @@
         }
         builder.CloseElement(); // meta
 
+        if (hasReasoning || hasSql)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-insight-tabs");
+
+            if (hasReasoning)
+            {
+                builder.OpenElement(seq++, "button");
+                builder.AddAttribute(seq++, "type", "button");
+                builder.AddAttribute(seq++, "class", GetInsightTabClass(m, ReasoningTab));
+                builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => ToggleInsightTab(m, ReasoningTab)));
+                builder.AddContent(seq++, "\u041a\u0430\u043a \u044f \u043f\u043e\u043d\u044f\u043b \u0437\u0430\u043f\u0440\u043e\u0441");
+                builder.CloseElement();
+            }
+
+            if (hasSql)
+            {
+                builder.OpenElement(seq++, "button");
+                builder.AddAttribute(seq++, "type", "button");
+                builder.AddAttribute(seq++, "class", GetInsightTabClass(m, SqlTab));
+                builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => ToggleInsightTab(m, SqlTab)));
+                builder.AddContent(seq++, "SQL \u0437\u0430\u043f\u0440\u043e\u0441");
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
         // Reasoning trail — always visible
-        if (pr.ReasoningTrail.Count > 0)
+        if (hasReasoning && string.Equals(m.InsightTab, ReasoningTab, StringComparison.Ordinal))
         {
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-trail");
 
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-trail-title");
-            builder.AddContent(seq++, "Как я понял(а) запрос");
+            builder.AddContent(seq++, "\u041a\u0430\u043a \u044f \u043f\u043e\u043d\u044f\u043b(\u0430) \u0437\u0430\u043f\u0440\u043e\u0441");
             builder.CloseElement();
 
             builder.OpenElement(seq++, "ol");
             builder.AddAttribute(seq++, "class", "bi-trail-list");
             foreach (var step in pr.ReasoningTrail)
             {
+                if (!string.IsNullOrEmpty(step.Code))
+                {
+                    continue;
+                }
+
                 builder.OpenElement(seq++, "li");
                 builder.AddAttribute(seq++, "class", "bi-trail-step");
 
@@ -431,14 +476,6 @@
                 }
                 builder.CloseElement();
 
-                if (!string.IsNullOrEmpty(step.Code))
-                {
-                    builder.OpenElement(seq++, "pre");
-                    builder.AddAttribute(seq++, "class", "bi-sql");
-                    builder.AddContent(seq++, step.Code);
-                    builder.CloseElement();
-                }
-
                 builder.CloseElement(); // li
             }
             builder.CloseElement(); // ol
@@ -446,6 +483,48 @@
         }
 
         // Secondary details (intent JSON, tech) — still behind toggle for devs
+        if (hasSql && string.Equals(m.InsightTab, SqlTab, StringComparison.Ordinal))
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-insight-panel");
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-trail-title");
+            builder.AddContent(seq++, "SQL \u0437\u0430\u043f\u0440\u043e\u0441");
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "pre");
+            builder.AddAttribute(seq++, "class", "bi-sql");
+            builder.AddContent(seq++, pr.Sql);
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "class", "bi-details-btn");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => m.DetailsOpen = !m.DetailsOpen));
+            builder.AddContent(seq++, m.DetailsOpen
+                ? "\u0421\u043a\u0440\u044b\u0442\u044c \u0442\u0435\u0445\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0434\u0435\u0442\u0430\u043b\u0438"
+                : "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u0442\u0435\u0445\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0434\u0435\u0442\u0430\u043b\u0438");
+            builder.CloseElement();
+
+            if (m.DetailsOpen)
+            {
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "bi-tech");
+                builder.AddContent(seq++, pr.TechnicalExplain);
+                builder.CloseElement();
+
+                builder.OpenElement(seq++, "pre");
+                builder.AddAttribute(seq++, "class", "bi-json");
+                builder.AddContent(seq++, SerializeIntent(pr.Intent));
+                builder.CloseElement();
+            }
+
+            builder.CloseElement();
+        }
+
+        /*
+        if (false)
+        {
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "class", "bi-details-btn");
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => m.DetailsOpen = !m.DetailsOpen));
@@ -464,6 +543,8 @@
             builder.AddContent(seq++, SerializeIntent(pr.Intent));
             builder.CloseElement();
         }
+        }
+        */
         builder.CloseElement(); // explain card
 
         if (pr.Result != null && pr.Result.RowCount > 0)

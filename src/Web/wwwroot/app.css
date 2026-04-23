@@ -460,12 +460,43 @@ h1:focus {
 }
 
 /* Reasoning trail — how the model understood the query */
-.bi-trail {
+.bi-insight-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
     margin-top: 12px;
+}
+.bi-insight-tab {
+    background: #f8fafc;
+    color: #475569;
+    border: 1px solid #dbe4f0;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.bi-insight-tab:hover {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+    color: #4338ca;
+}
+.bi-insight-tab.active {
+    background: #4338ca;
+    border-color: #4338ca;
+    color: white;
+}
+.bi-insight-panel,
+.bi-trail {
+    margin-top: 10px;
     background: linear-gradient(180deg, #f8f9ff 0%, #ffffff 100%);
     border: 1px solid #e0e7ff;
     border-radius: 10px;
     padding: 12px 14px 14px;
+}
+.bi-insight-summary {
+    margin-bottom: 10px;
 }
 .bi-trail-title {
     font-size: 12px; font-weight: 600; color: #4338ca;
@@ -481,29 +512,14 @@ h1:focus {
     counter-increment: trail;
 }
 .bi-trail-head {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 0;
     font-size: 13.5px; color: #1f2937; font-weight: 600;
 }
-.bi-trail-ico { font-size: 15px; }
+.bi-trail-ico { display: none; }
 .bi-trail-step-title { flex: 1; }
 .bi-trail-detail {
-    margin-top: 4px; margin-left: 26px;
+    margin-top: 4px; margin-left: 0;
     font-size: 13px; color: #334155; line-height: 1.55;
-}
-.bi-trail-detail code,
-.bi-trail-detail :not(pre) > code {
-    background: #eef2ff; color: #4338ca;
-    padding: 1px 6px; border-radius: 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-}
-.bi-trail-step .bi-sql {
-    margin-left: 26px; margin-top: 8px;
-    background: #0f172a; color: #e2e8f0;
-    padding: 10px 12px; border-radius: 8px;
-    font-size: 12px; line-height: 1.5;
-    white-space: pre-wrap; overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Tighter overrides inside result bubbles */

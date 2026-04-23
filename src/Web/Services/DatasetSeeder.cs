@@ -24,7 +24,30 @@ public class DatasetSeeder
         var dir = Path.GetDirectoryName(_dbPath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
+        try
+        {
+            EnsureSeededCore();
+        }
+        catch (SqliteException ex) when (IsMalformedDatabase(ex))
+        {
+            _log.LogWarning(ex, "Analytics DB at {Path} is malformed. Rebuilding from source dataset.", _dbPath);
+            try
+            {
+                BackupDatabaseArtifacts();
+            }
+            catch (Exception backupEx) when (backupEx is UnauthorizedAccessException or IOException)
+            {
+                throw new InvalidOperationException(
+                    $"Analytics DB at '{_dbPath}' is corrupted and locked by another process. Stop any running Web app or Rider debug session that uses '{_dbPath}', '{_dbPath}-wal', or '{_dbPath}-shm', then start the app again.",
+                    backupEx);
+            }
+            EnsureSeededCore();
+        }
+    }
+
+    private void EnsureSeededCore()
+    {
+        using var conn = new SqliteConnection(BuildConnectionString());
         conn.Open();
 
         if (HasOrdersTable(conn))
@@ -52,6 +75,33 @@ public class DatasetSeeder
         CreateIndexes(conn);
         _log.LogInformation("Dataset ready");
     }
+
+    private static bool IsMalformedDatabase(SqliteException ex) => ex.SqliteErrorCode == 11;
+
+    private void BackupDatabaseArtifacts()
+    {
+        foreach (var path in GetDatabaseArtifacts())
+        {
+            if (!File.Exists(path)) continue;
+
+            var backupPath = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmssfff}.bak";
+            File.Move(path, backupPath, overwrite: true);
+            _log.LogWarning("Moved corrupted SQLite artifact from {Path} to {BackupPath}", path, backupPath);
+        }
+    }
+
+    private IEnumerable<string> GetDatabaseArtifacts()
+    {
+        yield return _dbPath;
+        yield return $"{_dbPath}-wal";
+        yield return $"{_dbPath}-shm";
+    }
+
+    private string BuildConnectionString() => new SqliteConnectionStringBuilder
+    {
+        DataSource = _dbPath,
+        Pooling = false
+    }.ToString();
 
     private static bool HasOrdersTable(SqliteConnection c)
     {

@@ -67,6 +67,11 @@ public class SqlBuilder
                 "Фильтры",
                 string.Join(", ", intent.Filters.Select(kv => $"`{kv.Key}` = `{kv.Value}`"))));
 
+        if (period != null)
+            trail.Add(new ReasoningStep("",
+                "\u041a\u0430\u043b\u0435\u043d\u0434\u0430\u0440\u043d\u0430\u044f \u0438\u043d\u0442\u0435\u0440\u043f\u0440\u0435\u0442\u0430\u0446\u0438\u044f",
+                DescribePeriodResolution(intent.Period, period)));
+
         var sb = new StringBuilder();
         sb.Append("SELECT ");
         if (dim != null)
@@ -140,7 +145,8 @@ public class SqlBuilder
                 $"FROM {metric.Table} WHERE {filter}order_timestamp >= {fromKey} AND order_timestamp < {toKey}"
             );
             humanPeriods.Add(p.Label);
-            periodLines.Add($"`{pKey}` → **{p.Label}**: с {p.From:yyyy-MM-dd} по {p.To.AddSeconds(-1):yyyy-MM-dd}");
+            periodLines.Add(DescribePeriodResolution(pKey, p));
+            periodLines.Add($"`{pKey}` -> **{p.Label}**: \u0441 {p.From:yyyy-MM-dd} \u043f\u043e {p.To.AddSeconds(-1):yyyy-MM-dd}");
             i++;
         }
 
@@ -164,6 +170,21 @@ public class SqlBuilder
         var human = $"Сравнение метрики «{metric.DisplayName}» между периодами: {string.Join(" vs ", humanPeriods)}.";
         var tech = $"Шаблон: compare_periods | метрика={metric.Key} | periods={string.Join(",", intent.Periods!)}";
         return new BuiltSql(sql, pars, human, tech, trail);
+    }
+
+    private static string DescribePeriodResolution(string? periodKey, PeriodRange period)
+    {
+        var from = period.From.ToString("yyyy-MM-dd");
+        var to = period.To.AddSeconds(-1).ToString("yyyy-MM-dd");
+
+        return periodKey switch
+        {
+            "current_year" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u044d\u0442\u043e\u0442 \u0433\u043e\u0434\u00bb \u043a\u0430\u043a {period.From.Year} \u0433\u043e\u0434: \u0441 {from} \u043f\u043e {to}.",
+            "previous_year" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u043f\u0440\u043e\u0448\u043b\u044b\u0439 \u0433\u043e\u0434\u00bb \u043a\u0430\u043a {period.From.Year} \u0433\u043e\u0434: \u0441 {from} \u043f\u043e {to}.",
+            "current_month" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043c\u0435\u0441\u044f\u0446\u00bb \u043a\u0430\u043a \u043f\u0435\u0440\u0438\u043e\u0434 \u0441 {from} \u043f\u043e {to}.",
+            "last_month" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u043f\u0440\u043e\u0448\u043b\u044b\u0439 \u043c\u0435\u0441\u044f\u0446\u00bb \u043a\u0430\u043a \u043f\u0435\u0440\u0438\u043e\u0434 \u0441 {from} \u043f\u043e {to}.",
+            _ => $"\u041f\u0435\u0440\u0438\u043e\u0434 \u00ab{period.Label}\u00bb: \u0441 {from} \u043f\u043e {to}."
+        };
     }
 
     private static void ApplyFilters(Dictionary<string, string>? filters, List<string> where, Dictionary<string, object?> pars)
