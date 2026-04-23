@@ -1,5 +1,17 @@
 window.driveeCharts = (function () {
     const instances = {};
+    let zoomRegistered = false;
+
+    function ensureZoomRegistered() {
+        if (zoomRegistered) return;
+        if (window.ChartZoom && window.Chart) {
+            window.Chart.register(window.ChartZoom);
+            zoomRegistered = true;
+        } else if (window.Chart && window.Chart.registry && window.chartjsPluginZoom) {
+            window.Chart.register(window.chartjsPluginZoom);
+            zoomRegistered = true;
+        }
+    }
 
     function destroy(id) {
         if (instances[id]) {
@@ -8,10 +20,14 @@ window.driveeCharts = (function () {
         }
     }
 
+    function resetZoom(id) {
+        const c = instances[id];
+        if (c && typeof c.resetZoom === 'function') c.resetZoom();
+    }
+
     function formatLabel(v) {
         if (v === null || v === undefined) return '';
         const s = String(v);
-        // ISO datetime → short date
         const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/);
         if (m) return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
         return s;
@@ -20,6 +36,7 @@ window.driveeCharts = (function () {
     function render(id, type, labels, values, title) {
         const el = document.getElementById(id);
         if (!el) return;
+        ensureZoomRegistered();
         destroy(id);
 
         const palette = [
@@ -80,6 +97,45 @@ window.driveeCharts = (function () {
             border: { display: false }
         };
 
+        const isZoomable = type !== 'pie';
+        const plugins = {
+            legend: { display: type === 'pie', position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+            title: { display: !!title, text: title, font: { size: 13, weight: '600' }, color: '#1f2937', padding: { bottom: 10 } },
+            tooltip: {
+                backgroundColor: '#0f172a',
+                titleFont: { size: 12, weight: '600' },
+                bodyFont: { size: 12 },
+                padding: 10,
+                displayColors: type === 'pie'
+            }
+        };
+
+        if (isZoomable && zoomRegistered) {
+            plugins.zoom = {
+                limits: {
+                    x: { min: 'original', max: 'original', minRange: 1 },
+                    y: { min: 'original', max: 'original' }
+                },
+                pan: {
+                    enabled: true,
+                    mode: 'xy',
+                    modifierKey: null
+                },
+                zoom: {
+                    wheel: { enabled: true, speed: 0.1, modifierKey: null },
+                    pinch: { enabled: true },
+                    drag: {
+                        enabled: true,
+                        modifierKey: 'shift',
+                        backgroundColor: 'rgba(79,70,229,0.15)',
+                        borderColor: 'rgba(79,70,229,0.6)',
+                        borderWidth: 1
+                    },
+                    mode: 'x'
+                }
+            };
+        }
+
         const cfg = {
             type: type === 'line' ? 'line' : type === 'pie' ? 'pie' : 'bar',
             data: data,
@@ -88,17 +144,7 @@ window.driveeCharts = (function () {
                 maintainAspectRatio: false,
                 layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
                 interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { display: type === 'pie', position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
-                    title: { display: !!title, text: title, font: { size: 13, weight: '600' }, color: '#1f2937', padding: { bottom: 10 } },
-                    tooltip: {
-                        backgroundColor: '#0f172a',
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12 },
-                        padding: 10,
-                        displayColors: type === 'pie'
-                    }
-                },
+                plugins: plugins,
                 scales: type === 'pie' ? {} : { x: xAxis, y: yAxis }
             }
         };
@@ -106,7 +152,7 @@ window.driveeCharts = (function () {
         instances[id] = new Chart(el.getContext('2d'), cfg);
     }
 
-    return { render, destroy };
+    return { render, destroy, resetZoom };
 })();
 
 window.driveeChat = {

@@ -3,6 +3,15 @@
 
 <div class="chart-wrap">
     <canvas id="@_chartId" @ref="_canvas"></canvas>
+    @if (Type != "pie")
+    {
+        <div class="chart-controls">
+            <span class="chart-hint" title="Колесо — зум по X, перетаскивание — панорамирование, Shift+выделение — зум по области">
+                🔍 колесо · drag · Shift+выделение
+            </span>
+            <button class="chart-reset" @onclick="ResetZoom" title="Сбросить масштаб">⟲ Сброс</button>
+        </div>
+    }
 </div>
 
 @code {
@@ -16,7 +25,7 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (Result == null || Result.Columns.Count < 1 || Result.Rows.Count == 0) return;
-        
+
         string[] labels;
         double[] values;
 
@@ -36,6 +45,11 @@
             await JS.InvokeVoidAsync("driveeCharts.render", _chartId, Type, labels, values, Title);
         }
         catch (JSException) { }
+    }
+
+    private async Task ResetZoom()
+    {
+        try { await JS.InvokeVoidAsync("driveeCharts.resetZoom", _chartId); } catch { }
     }
 
     private static double ToDouble(object? v) => v switch
