@@ -1,15 +1,17 @@
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<div class="chart-wrap">
-    <canvas id="@_chartId" @ref="_canvas"></canvas>
+<div class="chart-block">
+    <div class="chart-wrap">
+        <canvas id="@_chartId" @ref="_canvas"></canvas>
+    </div>
     @if (Type != "pie")
     {
-        <div class="chart-controls">
+        <div class="chart-toolbar">
             <span class="chart-hint" title="Колесо — зум по X, перетаскивание — панорамирование, Shift+выделение — зум по области">
-                🔍 колесо · drag · Shift+выделение
+                Колесо · drag · Shift+выделение
             </span>
-            <button class="chart-reset" @onclick="ResetZoom" title="Сбросить масштаб">⟲ Сброс</button>
+            <button class="chart-reset" @onclick="ResetZoom" title="Сбросить масштаб">Сброс</button>
         </div>
     }
 </div>
