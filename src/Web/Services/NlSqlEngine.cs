@@ -21,13 +21,17 @@ public class NlSqlEngine
         _log = log;
     }
 
-    public async Task<PipelineResult> RunAsync(string userQuery, CancellationToken ct = default)
+    public async Task<PipelineResult> RunAsync(
+        string userQuery,
+        IReadOnlyList<ChatTurn>? history = null,
+        QueryIntent? previousIntent = null,
+        CancellationToken ct = default)
     {
         var pr = new PipelineResult { UserQuery = userQuery };
         try
         {
             var system = PromptTemplates.SystemPrompt(_semantic);
-            var intent = await _llm.InterpretAsync(userQuery, system, ct);
+            var intent = await _llm.InterpretAsync(userQuery, system, history, previousIntent, ct);
             pr.Intent = intent;
             pr.Confidence = intent.Confidence;
             pr.Visualization = intent.VisualizationHint;
