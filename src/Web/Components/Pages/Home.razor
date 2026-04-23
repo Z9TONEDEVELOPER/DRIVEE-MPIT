@@ -214,7 +214,13 @@
         _thinkingLabel = "Интерпретирую запрос…";
         StateHasChanged();
 
-        var pr = await Engine.RunAsync(q);
+        var history = BuildHistory();
+        var prevIntent = _messages
+            .Where(m => m.Role == "result" && m.Result?.Intent?.Kind == "query")
+            .Select(m => m.Result!.Intent)
+            .LastOrDefault();
+
+        var pr = await Engine.RunAsync(q, history, prevIntent);
         pr.UserQuery = q;
 
         var msg = new ChatMsg();
@@ -235,6 +241,23 @@
     }
 
     private void UseTemplate(string t) => _query = t;
+
+    private List<ChatTurn> BuildHistory()
+    {
+        var turns = new List<ChatTurn>();
+        foreach (var m in _messages.TakeLast(8))
+        {
+            if (m.Role == "user" && !string.IsNullOrWhiteSpace(m.Text))
+                turns.Add(new ChatTurn("user", m.Text));
+            else if (m.Role == "chat" && !string.IsNullOrWhiteSpace(m.Text))
+                turns.Add(new ChatTurn("assistant", m.Text));
+            else if (m.Role == "result" && m.Result?.Intent != null)
+                turns.Add(new ChatTurn("assistant", JsonSerializer.Serialize(m.Result.Intent)));
+        }
+        // Drop the final "user" turn since RunQuery will add it as the user message
+        if (turns.Count > 0 && turns[^1].Role == "user") turns.RemoveAt(turns.Count - 1);
+        return turns;
+    }
 
     private void ClearChat()
     {
