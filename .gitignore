@@ -307,3 +307,5 @@ wwwroot/_content/
 # === Node.js ===
 node_modules/
 npm-debug.log*
+
+.claude/**
