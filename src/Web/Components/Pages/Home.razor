@@ -373,7 +373,7 @@
             builder.CloseElement();
         }
 
-        // Meta row: confidence + details toggle
+        // Meta row: confidence + row stats
         builder.OpenElement(seq++, "div");
         builder.AddAttribute(seq++, "class", "bi-result-meta");
         var confClass = pr.Confidence >= 0.7 ? "high" : pr.Confidence >= 0.4 ? "mid" : "low";
@@ -389,24 +389,74 @@
             builder.AddContent(seq++, $"{pr.Result.RowCount} строк · {pr.Result.DurationMs} мс");
             builder.CloseElement();
         }
+        builder.CloseElement(); // meta
 
+        // Reasoning trail — always visible
+        if (pr.ReasoningTrail.Count > 0)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-trail");
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-trail-title");
+            builder.AddContent(seq++, "Как я понял(а) запрос");
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "ol");
+            builder.AddAttribute(seq++, "class", "bi-trail-list");
+            foreach (var step in pr.ReasoningTrail)
+            {
+                builder.OpenElement(seq++, "li");
+                builder.AddAttribute(seq++, "class", "bi-trail-step");
+
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "bi-trail-head");
+                builder.OpenElement(seq++, "span");
+                builder.AddAttribute(seq++, "class", "bi-trail-ico");
+                builder.AddContent(seq++, step.Icon);
+                builder.CloseElement();
+                builder.OpenElement(seq++, "span");
+                builder.AddAttribute(seq++, "class", "bi-trail-step-title");
+                builder.AddContent(seq++, step.Title);
+                builder.CloseElement();
+                builder.CloseElement();
+
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "bi-trail-detail");
+                foreach (var line in (step.Detail ?? "").Split('\n'))
+                {
+                    builder.OpenElement(seq++, "div");
+                    builder.AddContent(seq++, line);
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+
+                if (!string.IsNullOrEmpty(step.Code))
+                {
+                    builder.OpenElement(seq++, "pre");
+                    builder.AddAttribute(seq++, "class", "bi-sql");
+                    builder.AddContent(seq++, step.Code);
+                    builder.CloseElement();
+                }
+
+                builder.CloseElement(); // li
+            }
+            builder.CloseElement(); // ol
+            builder.CloseElement(); // bi-trail
+        }
+
+        // Secondary details (intent JSON, tech) — still behind toggle for devs
         builder.OpenElement(seq++, "button");
         builder.AddAttribute(seq++, "class", "bi-details-btn");
         builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => m.DetailsOpen = !m.DetailsOpen));
-        builder.AddContent(seq++, m.DetailsOpen ? "Скрыть SQL/detail" : "Показать SQL/detail");
+        builder.AddContent(seq++, m.DetailsOpen ? "Скрыть технические детали" : "Показать технические детали");
         builder.CloseElement();
-        builder.CloseElement(); // meta
 
         if (m.DetailsOpen)
         {
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-tech");
             builder.AddContent(seq++, pr.TechnicalExplain);
-            builder.CloseElement();
-
-            builder.OpenElement(seq++, "pre");
-            builder.AddAttribute(seq++, "class", "bi-sql");
-            builder.AddContent(seq++, pr.Sql);
             builder.CloseElement();
 
             builder.OpenElement(seq++, "pre");
