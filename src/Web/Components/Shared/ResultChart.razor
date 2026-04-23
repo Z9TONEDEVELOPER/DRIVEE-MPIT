@@ -1,0 +1,60 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="chart-wrap">
+    <canvas id="@_id"></canvas>
+</div>
+
+@code {
+    [Parameter] public QueryResult? Result { get; set; }
+    [Parameter] public string Type { get; set; } = "bar";
+    [Parameter] public string Title { get; set; } = "";
+
+    private readonly string _id = "chart-" + Guid.NewGuid().ToString("N");
+    private QueryResult? _last;
+    private string? _lastType;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Result == null || Result.Columns.Count < 1 || Result.Rows.Count == 0) return;
+        if (_last == Result && _lastType == Type) return;
+        _last = Result;
+        _lastType = Type;
+
+        string[] labels;
+        double[] values;
+
+        if (Result.Columns.Count >= 2)
+        {
+            labels = Result.Rows.Select(r => r[0]?.ToString() ?? "").ToArray();
+            values = Result.Rows.Select(r => ToDouble(r[1])).ToArray();
+        }
+        else
+        {
+            labels = new[] { Result.Columns[0] };
+            values = new[] { ToDouble(Result.Rows[0][0]) };
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("driveeCharts.render", _id, Type, labels, values, Title);
+        }
+        catch (JSException) { }
+    }
+
+    private static double ToDouble(object? v) => v switch
+    {
+        null => 0,
+        double d => d,
+        float f => f,
+        decimal m => (double)m,
+        long l => l,
+        int i => i,
+        _ => double.TryParse(v.ToString(), out var r) ? r : 0
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("driveeCharts.destroy", _id); } catch { }
+    }
+}

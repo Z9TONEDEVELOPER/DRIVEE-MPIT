@@ -1,0 +1,61 @@
+@page "/reports"
+@rendermode InteractiveServer
+@inject ReportService ReportsSvc
+@inject NavigationManager Nav
+
+<PageTitle>Отчёты</PageTitle>
+
+<div class="bi-page">
+    <h1>Сохранённые отчёты</h1>
+    <p class="bi-muted">Отчёт хранит: исходный запрос, структурированную интерпретацию, итоговый SQL и тип визуализации. Повторное открытие — заново исполняет запрос.</p>
+
+    @if (_items.Count == 0)
+    {
+        <div class="bi-empty">Пока нет сохранённых отчётов. Перейдите в <a href="/">Workspace</a> и создайте первый.</div>
+    }
+    else
+    {
+        <table class="bi-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Название</th>
+                    <th>Запрос</th>
+                    <th>Визуализация</th>
+                    <th>Автор</th>
+                    <th>Создан</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _items)
+                {
+                    <tr>
+                        <td>@r.Id</td>
+                        <td>@r.Name</td>
+                        <td class="bi-muted">@r.UserQuery</td>
+                        <td>@r.Visualization</td>
+                        <td>@r.Author</td>
+                        <td>@r.CreatedAt.ToLocalTime().ToString("g")</td>
+                        <td>
+                            <button class="bi-btn" @onclick="() => Open(r.Id)">Открыть</button>
+                            <button class="bi-btn ghost" @onclick="() => Del(r.Id)">Удалить</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private List<Report> _items = new();
+
+    protected override void OnInitialized() => Load();
+
+    private void Load() => _items = ReportsSvc.List();
+
+    private void Open(int id) => Nav.NavigateTo($"/?report={id}");
+
+    private void Del(int id) { ReportsSvc.Delete(id); Load(); }
+}

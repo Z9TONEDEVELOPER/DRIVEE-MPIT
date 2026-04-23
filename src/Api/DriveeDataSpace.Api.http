@@ -1,0 +1,6 @@
+@DriveeDataSpace.Api_HostAddress = http://localhost:5099
+
+GET {{DriveeDataSpace.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

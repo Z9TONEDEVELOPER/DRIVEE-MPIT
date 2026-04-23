@@ -1,0 +1,504 @@
+@page "/"
+@rendermode InteractiveServer
+@using System.Text.Json
+@inject NlSqlEngine Engine
+@inject ReportService Reports
+@inject IJSRuntime JS
+
+<PageTitle>Drivee BI · Чат с данными</PageTitle>
+
+<div class="bi-workspace">
+    <aside class="bi-sidebar">
+        <div class="bi-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-sub">NL → SQL аналитика</div>
+            </div>
+        </div>
+
+        <button class="bi-new-chat" @onclick="ClearChat">＋ Новый чат</button>
+
+        <div class="bi-section-title">Шаблоны запросов</div>
+        <div class="bi-templates">
+            @foreach (var t in _templates)
+            {
+                <button class="bi-template" @onclick="() => UseTemplate(t)">@t</button>
+            }
+        </div>
+
+        <div class="bi-section-title">Сохранённые отчёты</div>
+        <div class="bi-reports-list">
+            @if (_reports.Count == 0)
+            {
+                <div class="bi-muted">Сохраните первый отчёт</div>
+            }
+            else
+            {
+                @foreach (var r in _reports)
+                {
+                    <div class="bi-report-item">
+                        <button class="bi-report-link" @onclick="() => OpenReport(r.Id)" title="@r.UserQuery">
+                            @r.Name
+                        </button>
+                        <button class="bi-report-del" @onclick="() => DeleteReport(r.Id)" title="Удалить">×</button>
+                    </div>
+                }
+            }
+        </div>
+    </aside>
+
+    <main class="bi-chat-main">
+        <header class="bi-chat-header">
+            <div>
+                <h1>Чат с данными</h1>
+                <div class="bi-tagline">Спросил → система поняла → построила SQL → показала результат</div>
+            </div>
+        </header>
+
+        <div id="bi-chat-log" class="bi-chat-log">
+            @if (_messages.Count == 0)
+            {
+                <div class="bi-chat-welcome">
+                    <div class="bi-welcome-icon">◆</div>
+                    <h2>Привет! Я BI-ассистент Drivee</h2>
+                    <p>Спросите что угодно про заказы, выручку, отмены или поведение пользователей. Я сама интерпретирую запрос, построю безопасный SQL и покажу результат.</p>
+                    <div class="bi-welcome-examples">
+                        @foreach (var t in _templates.Take(4))
+                        {
+                            <button class="bi-welcome-ex" @onclick="() => RunQuery(t)">@t</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            @foreach (var m in _messages)
+            {
+                @if (m.Role == "user")
+                {
+                    <div class="bi-msg bi-msg-user">
+                        <div class="bi-bubble bi-bubble-user">@m.Text</div>
+                    </div>
+                }
+                else if (m.Role == "chat")
+                {
+                    <div class="bi-msg bi-msg-bot">
+                        <div class="bi-avatar">◆</div>
+                        <div class="bi-bubble bi-bubble-bot">
+                            @foreach (var line in (m.Text ?? "").Split('\n'))
+                            {
+                                <p>@line</p>
+                            }
+                        </div>
+                    </div>
+                }
+                else if (m.Role == "result" && m.Result != null)
+                {
+                    <div class="bi-msg bi-msg-bot">
+                        <div class="bi-avatar">◆</div>
+                        <div class="bi-bubble bi-bubble-result">
+                            @RenderResult(m)
+                        </div>
+                    </div>
+                }
+            }
+
+            @if (_busy)
+            {
+                <div class="bi-msg bi-msg-bot">
+                    <div class="bi-avatar">◆</div>
+                    <div class="bi-bubble bi-bubble-bot bi-thinking">
+                        <span class="bi-typing"><span></span><span></span><span></span></span>
+                        <span>@_thinkingLabel</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="bi-chat-input-area">
+            <div class="bi-chat-input-wrap">
+                <textarea class="bi-chat-input"
+                          @bind="_query"
+                          @bind:event="oninput"
+                          @onkeydown="OnKeyDown"
+                          placeholder="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
+                          rows="1"></textarea>
+                <button class="bi-send" @onclick="Send" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))" title="Отправить">
+                    @if (_busy)
+                    {
+                        <span>…</span>
+                    }
+                    else
+                    {
+                        <span>➤</span>
+                    }
+                </button>
+            </div>
+            <div class="bi-chat-hint">LLM интерпретирует смысл → SQL строится программно из шаблонов · guardrails: read-only SELECT, LIMIT, таймаут</div>
+        </div>
+    </main>
+</div>
+
+@code {
+    private string _query = "";
+    private bool _busy;
+    private string _thinkingLabel = "Думаю…";
+    private List<ChatMsg> _messages = new();
+    private List<Report> _reports = new();
+    private int _lastRenderedCount;
+
+    private readonly string[] _templates =
+    {
+        "Количество заказов по дням за последние 30 дней",
+        "Выручка по месяцам",
+        "Распределение заказов по часам",
+        "Доля отмен по дням за последний месяц",
+        "Средний чек по статусам",
+        "Сравни выручку за этот и прошлый месяц",
+        "Среднее расстояние и длительность поездок"
+    };
+
+    private class ChatMsg
+    {
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public string Role { get; set; } = "user";
+        public string? Text { get; set; }
+        public PipelineResult? Result { get; set; }
+        public string Visualization { get; set; } = "table";
+        public string ReportName { get; set; } = "";
+        public string? SavedAs { get; set; }
+        public bool DetailsOpen { get; set; }
+    }
+
+    protected override void OnInitialized() => RefreshReports();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_messages.Count != _lastRenderedCount || _busy)
+        {
+            _lastRenderedCount = _messages.Count;
+            try { await JS.InvokeVoidAsync("driveeChat.scrollToBottom", "bi-chat-log"); } catch { }
+        }
+    }
+
+    private void RefreshReports() => _reports = Reports.List();
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await Send();
+        }
+    }
+
+    private async Task Send()
+    {
+        var q = _query?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(q) || _busy) return;
+        _query = "";
+        await RunQuery(q);
+    }
+
+    private async Task RunQuery(string q)
+    {
+        if (_busy) return;
+        _messages.Add(new ChatMsg { Role = "user", Text = q });
+        _busy = true;
+        _thinkingLabel = "Интерпретирую запрос…";
+        StateHasChanged();
+
+        var pr = await Engine.RunAsync(q);
+        pr.UserQuery = q;
+
+        var msg = new ChatMsg();
+        if (pr.IsChat)
+        {
+            msg.Role = "chat";
+            msg.Text = pr.ChatReply;
+        }
+        else
+        {
+            msg.Role = "result";
+            msg.Result = pr;
+            msg.Visualization = pr.Visualization;
+            msg.ReportName = SuggestName(pr);
+        }
+        _messages.Add(msg);
+        _busy = false;
+    }
+
+    private void UseTemplate(string t) => _query = t;
+
+    private void ClearChat()
+    {
+        _messages.Clear();
+        _query = "";
+    }
+
+    private void SwitchViz(ChatMsg m, string v) => m.Visualization = v;
+
+    private void SaveReport(ChatMsg m)
+    {
+        if (m.Result?.Intent == null || m.Result.Sql == null) return;
+        var r = new Report
+        {
+            Name = string.IsNullOrWhiteSpace(m.ReportName) ? SuggestName(m.Result) : m.ReportName.Trim(),
+            UserQuery = m.Result.UserQuery,
+            IntentJson = JsonSerializer.Serialize(m.Result.Intent),
+            Sql = m.Result.Sql,
+            Visualization = m.Visualization,
+            Author = "demo"
+        };
+        var id = Reports.Save(r);
+        m.SavedAs = $"#{id}";
+        RefreshReports();
+    }
+
+    private void OpenReport(int id)
+    {
+        var r = Reports.Get(id);
+        if (r == null) return;
+        _messages.Add(new ChatMsg { Role = "user", Text = $"[↻ отчёт] {r.UserQuery}" });
+        try
+        {
+            var pr = Engine.ReplayFromReport(r.IntentJson);
+            pr.UserQuery = r.UserQuery;
+            _messages.Add(new ChatMsg
+            {
+                Role = "result",
+                Result = pr,
+                Visualization = pr.Visualization,
+                ReportName = r.Name,
+                SavedAs = $"#{r.Id}"
+            });
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ChatMsg { Role = "chat", Text = "Не удалось переисполнить отчёт: " + ex.Message });
+        }
+    }
+
+    private void DeleteReport(int id)
+    {
+        Reports.Delete(id);
+        RefreshReports();
+    }
+
+    private static string SuggestName(PipelineResult pr)
+    {
+        if (pr.Intent == null) return pr.UserQuery;
+        var parts = new List<string> { pr.Intent.Metric };
+        if (!string.IsNullOrEmpty(pr.Intent.GroupBy)) parts.Add($"× {pr.Intent.GroupBy}");
+        if (!string.IsNullOrEmpty(pr.Intent.Period)) parts.Add(pr.Intent.Period!);
+        return string.Join(" ", parts);
+    }
+
+    private static string SerializeIntent(QueryIntent? i) =>
+        i == null ? "" : JsonSerializer.Serialize(i, new JsonSerializerOptions { WriteIndented = true });
+
+    private static string FormatCell(object? v) => v switch
+    {
+        null => "—",
+        double d => d.ToString("0.##"),
+        float f => f.ToString("0.##"),
+        decimal m => m.ToString("0.##"),
+        _ => v.ToString() ?? ""
+    };
+
+    private RenderFragment RenderResult(ChatMsg m) => builder =>
+    {
+        var pr = m.Result!;
+        var seq = 0;
+
+        if (pr.Error != null)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-error");
+            builder.AddContent(seq++, $"Ошибка: {pr.Error}");
+            builder.CloseElement();
+            return;
+        }
+
+        // Explain card
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "bi-result-card");
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "bi-result-explain");
+        builder.AddContent(seq++, pr.Explain);
+        builder.CloseElement();
+
+        if (pr.Intent?.Explanation is { Length: > 0 } llmNote)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-explain-llm");
+            builder.AddContent(seq++, $"LLM: {llmNote}");
+            builder.CloseElement();
+        }
+
+        foreach (var w in pr.Warnings)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-warn");
+            builder.AddContent(seq++, $"⚠ {w}");
+            builder.CloseElement();
+        }
+
+        // Meta row: confidence + details toggle
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "bi-result-meta");
+        var confClass = pr.Confidence >= 0.7 ? "high" : pr.Confidence >= 0.4 ? "mid" : "low";
+        builder.OpenElement(seq++, "span");
+        builder.AddAttribute(seq++, "class", $"bi-confidence {confClass}");
+        builder.AddContent(seq++, $"confidence {(int)(pr.Confidence * 100)}%");
+        builder.CloseElement();
+
+        if (pr.Result != null)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "bi-meta-info");
+            builder.AddContent(seq++, $"{pr.Result.RowCount} строк · {pr.Result.DurationMs} мс");
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(seq++, "button");
+        builder.AddAttribute(seq++, "class", "bi-details-btn");
+        builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => m.DetailsOpen = !m.DetailsOpen));
+        builder.AddContent(seq++, m.DetailsOpen ? "Скрыть SQL/detail" : "Показать SQL/detail");
+        builder.CloseElement();
+        builder.CloseElement(); // meta
+
+        if (m.DetailsOpen)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-tech");
+            builder.AddContent(seq++, pr.TechnicalExplain);
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "pre");
+            builder.AddAttribute(seq++, "class", "bi-sql");
+            builder.AddContent(seq++, pr.Sql);
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "pre");
+            builder.AddAttribute(seq++, "class", "bi-json");
+            builder.AddContent(seq++, SerializeIntent(pr.Intent));
+            builder.CloseElement();
+        }
+        builder.CloseElement(); // explain card
+
+        if (pr.Result != null && pr.Result.RowCount > 0)
+        {
+            // Viz card
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-result-card");
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-viz-switch");
+            foreach (var v in new[] { "bar", "line", "pie", "table" })
+            {
+                var vv = v;
+                builder.OpenElement(seq++, "button");
+                builder.AddAttribute(seq++, "class", vv == m.Visualization ? "active" : "");
+                builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => SwitchViz(m, vv)));
+                builder.AddContent(seq++, vv);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            if (m.Visualization != "table")
+            {
+                builder.OpenComponent<ResultChart>(seq++);
+                builder.AddAttribute(seq++, "Result", pr.Result);
+                builder.AddAttribute(seq++, "Type", m.Visualization);
+                builder.AddAttribute(seq++, "Title", pr.Explain ?? "");
+                builder.SetKey(m.Id + ":" + m.Visualization);
+                builder.CloseComponent();
+            }
+            else
+            {
+                builder.AddContent(seq++, RenderTable(pr.Result));
+            }
+            builder.CloseElement();
+
+            if (m.Visualization != "table")
+            {
+                builder.OpenElement(seq++, "details");
+                builder.AddAttribute(seq++, "class", "bi-inline-details");
+                builder.OpenElement(seq++, "summary");
+                builder.AddContent(seq++, "Показать таблицу");
+                builder.CloseElement();
+                builder.AddContent(seq++, RenderTable(pr.Result));
+                builder.CloseElement();
+            }
+
+            // Save row
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-save-row");
+            if (m.SavedAs == null)
+            {
+                builder.OpenElement(seq++, "input");
+                builder.AddAttribute(seq++, "class", "bi-save-name");
+                builder.AddAttribute(seq++, "placeholder", "Название отчёта");
+                builder.AddAttribute(seq++, "value", m.ReportName);
+                builder.AddAttribute(seq++, "oninput",
+                    EventCallback.Factory.Create<ChangeEventArgs>(this, e => m.ReportName = e.Value?.ToString() ?? ""));
+                builder.CloseElement();
+
+                builder.OpenElement(seq++, "button");
+                builder.AddAttribute(seq++, "class", "bi-save-btn");
+                builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => SaveReport(m)));
+                builder.AddContent(seq++, "💾 Сохранить отчёт");
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.OpenElement(seq++, "span");
+                builder.AddAttribute(seq++, "class", "bi-save-msg");
+                builder.AddContent(seq++, $"✓ Сохранено как {m.SavedAs}");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
+    };
+
+    private RenderFragment RenderTable(QueryResult qr) => builder =>
+    {
+        var seq = 0;
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "bi-table-wrap");
+        builder.OpenElement(seq++, "table");
+        builder.AddAttribute(seq++, "class", "bi-table");
+        builder.OpenElement(seq++, "thead");
+        builder.OpenElement(seq++, "tr");
+        foreach (var c in qr.Columns)
+        {
+            builder.OpenElement(seq++, "th");
+            builder.AddContent(seq++, c);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+        builder.OpenElement(seq++, "tbody");
+        foreach (var row in qr.Rows.Take(200))
+        {
+            builder.OpenElement(seq++, "tr");
+            foreach (var cell in row)
+            {
+                builder.OpenElement(seq++, "td");
+                builder.AddContent(seq++, FormatCell(cell));
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+        if (qr.RowCount > 200)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "bi-muted");
+            builder.AddContent(seq++, $"Показаны первые 200 из {qr.RowCount}");
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+}
