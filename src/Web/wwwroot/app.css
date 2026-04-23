@@ -216,6 +216,28 @@ h1:focus {
 .bi-viz-switch button.active { background: #4f46e5; color: white; border-color: #4f46e5; }
 
 .chart-wrap { position: relative; height: 320px; }
+.chart-controls {
+    position: absolute; top: 8px; right: 8px;
+    display: flex; gap: 6px; align-items: center;
+    font-size: 11px; color: #94a3b8;
+    pointer-events: none;
+}
+.chart-controls .chart-hint {
+    background: rgba(255,255,255,0.85);
+    padding: 3px 8px; border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    backdrop-filter: blur(4px);
+}
+.chart-controls .chart-reset {
+    pointer-events: auto;
+    background: white; border: 1px solid #e5e7eb;
+    padding: 3px 8px; border-radius: 12px; cursor: pointer;
+    color: #475569; font-size: 11px;
+    transition: all 0.12s;
+}
+.chart-controls .chart-reset:hover {
+    background: #eef2ff; border-color: #c7d2fe; color: #4f46e5;
+}
 
 .bi-table-wrap { overflow-x: auto; }
 .bi-table {
