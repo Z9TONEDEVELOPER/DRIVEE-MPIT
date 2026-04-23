@@ -459,6 +459,53 @@ h1:focus {
     margin-top: 6px;
 }
 
+/* Reasoning trail — how the model understood the query */
+.bi-trail {
+    margin-top: 12px;
+    background: linear-gradient(180deg, #f8f9ff 0%, #ffffff 100%);
+    border: 1px solid #e0e7ff;
+    border-radius: 10px;
+    padding: 12px 14px 14px;
+}
+.bi-trail-title {
+    font-size: 12px; font-weight: 600; color: #4338ca;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin-bottom: 10px;
+}
+.bi-trail-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.bi-trail-step {
+    position: relative; padding-left: 0;
+    counter-increment: trail;
+}
+.bi-trail-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13.5px; color: #1f2937; font-weight: 600;
+}
+.bi-trail-ico { font-size: 15px; }
+.bi-trail-step-title { flex: 1; }
+.bi-trail-detail {
+    margin-top: 4px; margin-left: 26px;
+    font-size: 13px; color: #334155; line-height: 1.55;
+}
+.bi-trail-detail code,
+.bi-trail-detail :not(pre) > code {
+    background: #eef2ff; color: #4338ca;
+    padding: 1px 6px; border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+}
+.bi-trail-step .bi-sql {
+    margin-left: 26px; margin-top: 8px;
+    background: #0f172a; color: #e2e8f0;
+    padding: 10px 12px; border-radius: 8px;
+    font-size: 12px; line-height: 1.5;
+    white-space: pre-wrap; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* Tighter overrides inside result bubbles */
 .bi-bubble-result .bi-sql { border-radius: 6px; margin-top: 8px; font-size: 12px; }
 .bi-bubble-result .bi-json { margin-top: 8px; font-size: 11.5px; max-height: 200px; overflow-y: auto; }

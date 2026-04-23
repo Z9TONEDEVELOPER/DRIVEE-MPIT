@@ -54,10 +54,20 @@ public class NlSqlEngine
             if (intent.Confidence < 0.4)
                 pr.Warnings.Add($"Низкая уверенность ({intent.Confidence:P0}). Уточните запрос.");
 
-            var built = _builder.Build(intent);
+            var built = _builder.Build(intent, userQuery);
             pr.Sql = FormatSqlForDisplay(built.Sql, built.Parameters);
             pr.Explain = built.HumanExplain;
             pr.TechnicalExplain = built.TechExplain;
+            pr.ReasoningTrail = built.ReasoningTrail;
+            pr.ReasoningTrail.Add(new Models.ReasoningStep(
+                "⚙️",
+                "SQL-запрос",
+                "Итоговый безопасный SELECT (read-only, параметризованный, с LIMIT):",
+                pr.Sql));
+            pr.ReasoningTrail.Add(new Models.ReasoningStep(
+                "❓",
+                "Я правильно понял?",
+                "Если какая-то деталь (метрика, период, группировка) разошлась с вашим намерением — напишите уточнение в чат, и я пересоберу запрос."));
 
             pr.Result = _executor.Execute(built.Sql, built.Parameters);
             if (pr.Result.RowCount == 0) pr.Warnings.Add("Запрос выполнен, но данных нет.");
@@ -79,10 +89,16 @@ public class NlSqlEngine
         pr.Confidence = intent.Confidence;
         pr.Visualization = intent.VisualizationHint;
 
-        var built = _builder.Build(intent);
+        var built = _builder.Build(intent, null);
         pr.Sql = FormatSqlForDisplay(built.Sql, built.Parameters);
         pr.Explain = built.HumanExplain + " (повторный запуск)";
         pr.TechnicalExplain = built.TechExplain;
+        pr.ReasoningTrail = built.ReasoningTrail;
+        pr.ReasoningTrail.Add(new Models.ReasoningStep(
+            "⚙️",
+            "SQL-запрос",
+            "Итоговый SELECT (повторный запуск сохранённого отчёта):",
+            pr.Sql));
         pr.Result = _executor.Execute(built.Sql, built.Parameters);
         return pr;
     }

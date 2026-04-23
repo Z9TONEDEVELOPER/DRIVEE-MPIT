@@ -8,6 +8,8 @@ public class QueryResult
     public long DurationMs { get; set; }
 }
 
+public record ReasoningStep(string Icon, string Title, string Detail, string? Code = null);
+
 public class PipelineResult
 {
     public string UserQuery { get; set; } = "";
@@ -22,4 +24,5 @@ public class PipelineResult
     public List<string> Warnings { get; set; } = new();
     public bool IsChat { get; set; }
     public string? ChatReply { get; set; }
+    public List<ReasoningStep> ReasoningTrail { get; set; } = new();
 }
