@@ -1,82 +1,315 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:DriveeDataSpace.Desktop.ViewModels"
-        xmlns:controls="using:ScottPlot.Avalonia"
-        xmlns:converters="using:DriveeDataSpace.Desktop.Converters"
+        xmlns:vm="using:DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels"
+        xmlns:views="using:DriveeDataSpace.DriveeDataSpace.Desktop"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        xmlns:viewModels="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels"
+        xmlns:views1="clr-namespace:DriveeDataSpace.Desktop.Views"
+        mc:Ignorable="d"
         x:Class="DriveeDataSpace.Desktop.Views.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
-        Title="DriveeDataSpace.Desktop">
-
+        x:DataType="viewModels:MainWindowViewModel"
+        Title="Drivee BI · NL → SQL аналитика"
+        Width="1280" Height="800"
+        MinWidth="900" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
     <Design.DataContext>
         <!-- This only sets the DataContext for the previewer in an IDE,
              to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
-        <vm:MainWindowViewModel/>
+        <viewModels:MainWindowViewModel/>
     </Design.DataContext>
-<DockPanel>
-        <!-- Верхняя панель -->
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="10">
-            <TextBox Text="{Binding QueryText}" PlaceholderText="Задайте вопрос на естественном языке..."
-                     MinWidth="600" IsReadOnly="{Binding IsLoading}"
-                     KeyDown="TextBox_KeyDown"/>
-            <Button Content="▶ Выполнить" Command="{Binding ExecuteQueryCommand}"
-                    IsEnabled="{Binding !IsLoading}" Width="120"/>
-            <Button Content="💾 Сохранить" Command="{Binding SaveReportCommand}" Width="110"/>
-            <ComboBox ItemsSource="{Binding ChartTypes}" SelectedItem="{Binding ChartType}" Width="80" 
-                      Margin="20,0,0,0"/>
-        </StackPanel>
+    <!-- ══════════════════════════════════════════════
+         ROOT: Sidebar (280) + Main content
+         ══════════════════════════════════════════════ -->
+    <Grid ColumnDefinitions="280,*">
 
-        <!-- Статус-бар -->
-        <ProgressBar DockPanel.Dock="Top" Height="4" Value="{Binding IsLoading, Converter={StaticResource BoolToProgressValue}}" 
-                     IsIndeterminate="{Binding IsLoading}" Margin="0,0,0,10"/>
-        <TextBlock DockPanel.Dock="Top" Text="{Binding Status}" FontSize="14" Margin="10,5"/>
+        <!-- ████████████████  SIDEBAR  ████████████████ -->
+        <Border Grid.Column="0"
+                Background="#0f172a"
+                Padding="14,18">
+            <DockPanel>
 
-        <Grid ColumnDefinitions="250,*,300">
-            <!-- Левая панель: Отчёты -->
-            <ListBox Grid.Column="0" ItemsSource="{Binding SavedReports}" Margin="10" SelectionMode="Single">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Button Content="{Binding Intent.Metric}" Command="{Binding DataContext.RerunReportCommand, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" 
-                                CommandParameter="{Binding}" HorizontalContentAlignment="Left" Margin="2"/>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                <!-- Brand -->
+                <StackPanel DockPanel.Dock="Top"
+                            Orientation="Horizontal"
+                            Spacing="10"
+                            Margin="0,0,0,16">
+                    <Border Background="#4f46e5"
+                            CornerRadius="8"
+                            Width="34" Height="34">
+                        <TextBlock Text="◆"
+                                   FontSize="18"
+                                   Foreground="White"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Drivee BI"
+                                   Foreground="White"
+                                   FontWeight="Bold"
+                                   FontSize="15"/>
+                        <TextBlock Text="NL → SQL аналитика"
+                                   Foreground="#94a3b8"
+                                   FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
 
-            <!-- Центр: Результат -->
-            <TabControl Grid.Column="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
-                <TabItem Header="📊 Таблица">
-                    <DataGrid ItemsSource="{Binding LastResult.ResultTable}" AutoGenerateColumns="True" Margin="10"/>
-                </TabItem>
-                <TabItem Header="📈 График">
-                    <controls:AvaPlot x:Name="PlotControl" Margin="10"/>
-                </TabItem>
-                <TabItem Header="🔍 SQL">
-                    <TextBox Text="{Binding LastResult.FinalSql}" IsReadOnly="True" TextWrapping="Wrap" 
-                             FontFamily="monospace" Margin="10"/>
-                </TabItem>
-                <TabItem Header="📖 Explain">
-                    <ScrollViewer Margin="10">
-                        <StackPanel>
-                            <TextBlock Text="🟢 Для бизнеса:" FontWeight="Bold" Margin="0,0,0,5"/>
-                            <TextBlock Text="{Binding LastResult.Explain.BusinessExplanation}" TextWrapping="Wrap" Margin="0,0,0,15"/>
-                            <TextBlock Text="🔧 Технически:" FontWeight="Bold" Margin="0,0,0,5"/>
-                            <TextBlock Text="{Binding LastResult.Explain.TechnicalExplanation}" TextWrapping="Wrap" FontFamily="monospace"/>
+                <!-- Nav -->
+                <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,12">
+                    <Button Classes="nav-link"
+                            Content="◈  Workspace"
+                            HorizontalAlignment="Stretch"
+                            Command="{Binding NavigateToCommand}"
+                            CommandParameter="workspace"/>
+                    <Button Classes="nav-link"
+                            Content="▤  Отчёты"
+                            HorizontalAlignment="Stretch"
+                            Command="{Binding NavigateToCommand}"
+                            CommandParameter="reports"/>
+                </StackPanel>
+
+                <!-- New chat -->
+                <Button DockPanel.Dock="Top"
+                        Content="＋  Новый чат"
+                        Classes="primary"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Margin="0,0,0,16"
+                        Command="{Binding Chat.ClearChatCommand}"/>
+
+                <!-- Scroll content -->
+                <ScrollViewer DockPanel.Dock="Bottom" VerticalScrollBarVisibility="Visible">
+                    <StackPanel Spacing="12">
+
+                        <!-- Templates -->
+                        <TextBlock Text="ШАБЛОНЫ ЗАПРОСОВ"
+                                   Foreground="#94a3b8"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   LetterSpacing="1"/>
+                        <ItemsControl ItemsSource="{Binding Chat}">
+                            <!-- ItemsSource="{Binding Chat.Templates}" -->
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding}"
+                                            Classes="template-btn"
+                                            HorizontalAlignment="Stretch"
+                                            Margin="0,0,0,4"
+                                            Command="{Binding $parent[Window].DataContext.Chat.UseTemplateCommand}"
+                                            CommandParameter="{Binding}"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Reports -->
+                        <TextBlock Text="СОХРАНЁННЫЕ ОТЧЁТЫ"
+                                   Foreground="#94a3b8"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   LetterSpacing="1"
+                                   Margin="0,8,0,0"/>
+
+                        <TextBlock Text="Сохраните первый отчёт"
+                                   Foreground="#64748b"
+                                   FontSize="12"
+                                   FontStyle="Italic"
+                                   IsVisible="{Binding Chat.Reports.Count, Converter={x:Static views1:Converters.IsZeroConverter}}"/>
+
+                        <ItemsControl ItemsSource="{Binding Chat.Reports}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="*,100" Margin="0,0,0,4">
+                                        <Button Grid.Column="0"
+                                                Content="{Binding Name}"
+                                                Classes="report-link"
+                                                HorizontalAlignment="Stretch"
+                                                Command="{Binding $parent[Window].DataContext.Chat.OpenReportCommand}"
+                                                CommandParameter="{Binding}"/>
+                                        <Button Grid.Column="1"
+                                                Content="×"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Foreground="#64748b"
+                                                FontSize="14"
+                                                Padding="6,4"
+                                                Cursor="Hand"
+                                                Command="{Binding $parent[Window].DataContext.Chat.DeleteReportCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- ████████████████  MAIN AREA  ████████████████ -->
+        <DockPanel Grid.Column="1" Background="#f7f8fb">
+
+            <!-- Header -->
+            <Border DockPanel.Dock="Top"
+                    Background="White"
+                    BorderBrush="#e5e7eb"
+                    BorderThickness="0,0,0,1"
+                    Padding="28,16">
+                <StackPanel>
+                    <TextBlock Text="Чат с данными"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Foreground="#0f172a"/>
+                    <TextBlock Text="Спросил → система поняла → построила SQL → показала результат"
+                               FontSize="12"
+                               Foreground="#64748b"
+                               Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Input Area -->
+            <Border DockPanel.Dock="Bottom"
+                    Background="White"
+                    BorderBrush="#e5e7eb"
+                    BorderThickness="0,1,0,0"
+                    Padding="28,14,28,10">
+                <StackPanel>
+                    <Border Background="#f7f8fb"
+                            BorderBrush="#e5e7eb"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            Padding="14,6,6,6">
+                        <Grid ColumnDefinitions="*,100">
+                            <TextBox Grid.Column="0"
+                                     x:Name="ChatInputBox"
+                                     Classes="chat-input"
+                                     Text="{Binding Chat.InputText}"
+                                     Watermark="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
+                                     IsEnabled="{Binding !Chat.IsBusy}"
+                                     KeyDown="ChatInput_KeyDown"
+                                     MaxHeight="200"/>
+                            <Button Grid.Column="1"
+                                    Classes="send"
+                                    Content="➤"
+                                    VerticalAlignment="Bottom"
+                                    IsEnabled="{Binding !Chat.IsBusy}"
+                                    Command="{Binding Chat.SendCommand}"/>
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="LLM интерпретирует смысл → SQL строится программно из шаблонов · guardrails: read-only SELECT, LIMIT, таймаут"
+                               FontSize="11"
+                               Foreground="#94a3b8"
+                               HorizontalAlignment="Center"
+                               Margin="0,6,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Thinking indicator -->
+            <Border DockPanel.Dock="Bottom"
+                    IsVisible="{Binding Chat.IsBusy}"
+                    Padding="28,0,28,8">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <!-- Avatar -->
+                    <Border Background="#4f46e5"
+                            CornerRadius="8"
+                            Width="32" Height="32">
+                        <TextBlock Text="◆"
+                                   Foreground="White"
+                                   FontSize="13"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Background="White"
+                            BorderBrush="#e5e7eb"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            Padding="14,10">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ProgressBar IsIndeterminate="True"
+                                         Width="60" Height="4"
+                                         VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Chat.ThinkingLabel}"
+                                       Foreground="#64748b"
+                                       FontSize="13"
+                                       VerticalAlignment="Center"/>
                         </StackPanel>
-                    </ScrollViewer>
-                </TabItem>
-            </TabControl>
+                    </Border>
+                </StackPanel>
+            </Border>
 
-            <!-- Правая панель: Быстрые шаблоны -->
-            <StackPanel Grid.Column="2" Margin="10">
-                <TextBlock Text="⚡ Быстрые шаблоны" FontWeight="Bold" Margin="0,0,0,10"/>
-                <Button Content="Выручка за 2024 vs 2025" Command="{Binding SetQueryCommand}" CommandParameter="Покажи выручку за этот год и прошлый и сравни" Margin="0,5"/>
-                <Button Content="Средний чек по городам" Command="{Binding SetQueryCommand}" CommandParameter="Средний чек поездки с группировкой по городу" Margin="0,5"/>
-                <Button Content="Количество поездок за месяц" Command="{Binding SetQueryCommand}" CommandParameter="Количество поездок за последний месяц" Margin="0,5"/>
-            </StackPanel>
-        </Grid>
-    </DockPanel>
-    
+            <!-- Chat log -->
+            <ScrollViewer x:Name="ChatScrollViewer"
+                          VerticalScrollBarVisibility="Visible"
+                          Padding="0,24">
+                <!-- Welcome screen -->
+                <Panel>
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                MaxWidth="560"
+                                Margin="0,40"
+                                IsVisible="{Binding Chat.IsEmpty}">
+                        <!-- Logo -->
+                        <Border Background="#4f46e5"
+                                CornerRadius="14"
+                                Width="60" Height="60"
+                                HorizontalAlignment="Center"
+                                Margin="0,0,0,18">
+                            <TextBlock Text="◆"
+                                       Foreground="White"
+                                       FontSize="28"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="Привет! Я BI-ассистент Drivee"
+                                   FontSize="22"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   Foreground="#0f172a"
+                                   Margin="0,0,0,8"/>
+                        <TextBlock Text="Спросите что угодно про заказы, выручку, отмены или поведение пользователей. Я интерпретирую запрос, построю безопасный SQL и покажу результат."
+                                   FontSize="14"
+                                   Foreground="#64748b"
+                                   TextWrapping="Wrap"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   Margin="0,0,0,22"/>
+                        <WrapPanel HorizontalAlignment="Center">
+                            <ItemsControl ItemsSource="{Binding Chat}">
+                                <!-- ItemsSource="{Binding Chat.Templates}" -->
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Content="{Binding}"
+                                                Background="White"
+                                                BorderBrush="#e5e7eb"
+                                                BorderThickness="1"
+                                                CornerRadius="20"
+                                                Padding="12,8"
+                                                FontSize="12.5"
+                                                Margin="4"
+                                                Cursor="Hand"
+                                                Command="{Binding $parent[Window].DataContext.Chat.UseTemplateCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <!-- Messages -->
+                    <ItemsControl ItemsSource="{Binding Chat.Messages}"
+                                  IsVisible="{Binding !Chat.IsEmpty}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <views1:ChatMessageView Margin="0,0,0,18"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Panel>
+            </ScrollViewer>
+        </DockPanel>
+    </Grid>
 </Window>

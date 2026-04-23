@@ -164,7 +164,7 @@
     }
     private string _thinkingLabel = "Думаю…";
     private List<WorkspaceChatMessage> _messages => WorkspaceState.Messages;
-    private List<Report> _reports = new();
+    private List<DriveeDataSpace.Web.Models.Report> _reports = new();
     private int _lastRenderedCount;
 
     private readonly string[] _templates =
@@ -178,7 +178,7 @@
         "Среднее расстояние и длительность поездок"
     };
 
-    private sealed class ChatMsg : WorkspaceChatMessage { }
+    private sealed class ChatMsg : DriveeDataSpace.Web.Models.WorkspaceChatMessage { }
 
     protected override void OnInitialized()
     {

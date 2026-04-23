@@ -6,7 +6,7 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <LangVersion>latest</LangVersion>
         <AssemblyName>DriveeDataSpace.$(MSBuildProjectName)</AssemblyName>
-        <RootNamespace>DriveeDataSpace.$(MSBuildProjectName.Replace(" ", "_"))</RootNamespace>
+        <!-- RootNamespace убран, чтобы не мешать автогенерации кода-behind в Avalonia -->
     </PropertyGroup>
 
     <!-- Оптимизации для отладки -->
