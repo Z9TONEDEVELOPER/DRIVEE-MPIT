@@ -74,6 +74,7 @@ public class LlmService
             });
             if (intent == null) return HeuristicFallback(userQuery, previousIntent);
             MergeWithPrevious(intent, previousIntent);
+            ApplyExplicitPeriodHints(intent, userQuery);
             return intent;
         }
         catch (JsonException)
@@ -96,6 +97,40 @@ public class LlmService
             current.GroupBy = prev.GroupBy;
         if (current.Filters == null && prev.Filters != null)
             current.Filters = prev.Filters;
+    }
+
+    private static void ApplyExplicitPeriodHints(QueryIntent intent, string userQuery)
+    {
+        if (intent.Kind != "query") return;
+
+        if (TryExtractRollingDaysPeriod(userQuery, out var rollingPeriod))
+            intent.Period = rollingPeriod;
+    }
+
+    private static bool TryExtractRollingDaysPeriod(string query, out string? period)
+    {
+        var lower = query.ToLowerInvariant();
+        var match = Regex.Match(
+            lower,
+            @"(?:(?:за|for|last)\s+)?(?:последн\w*\s+)?(\d{1,3})\s*(?:дн(?:ей|я|ь)?|days?)",
+            RegexOptions.CultureInvariant);
+
+        if (!match.Success || !int.TryParse(match.Groups[1].Value, out var days) || days <= 0)
+        {
+            period = null;
+            return false;
+        }
+
+        var matchedText = match.Value;
+        var hasPeriodCue = matchedText.Contains("за") || matchedText.Contains("послед") || matchedText.Contains("last") || matchedText.Contains("for");
+        if (!hasPeriodCue)
+        {
+            period = null;
+            return false;
+        }
+
+        period = $"last_{days}_days";
+        return true;
     }
 
     private static string ExtractContent(string body)
@@ -171,6 +206,12 @@ public class LlmService
         else if (lower.Contains("7 дн") || lower.Contains("семь дн")) intent.Period = "last_7_days";
         else if (lower.Contains("30 дн")) intent.Period = "last_30_days";
         else periodMatched = false;
+
+        if (TryExtractRollingDaysPeriod(q, out var rollingPeriod))
+        {
+            intent.Period = rollingPeriod;
+            periodMatched = true;
+        }
 
         bool isCompare = lower.Contains("сравн");
         if (isCompare)
@@ -280,7 +321,7 @@ public static class PromptTemplates
   ""intent"": ""aggregate"" | ""compare_periods"",
   ""metric"": одно из [{metrics}],
   ""group_by"": null | одно из [{dims}],
-  ""period"": null | ""today"" | ""yesterday"" | ""last_week"" | ""current_week"" | ""last_month"" | ""current_month"" | ""current_year"" | ""previous_year"" | ""last_7_days"" | ""last_30_days"",
+  ""period"": null | ""today"" | ""yesterday"" | ""last_week"" | ""current_week"" | ""last_month"" | ""current_month"" | ""current_year"" | ""previous_year"" | ""last_7_days"" | ""last_30_days"" | ""last_N_days"",
   ""periods"": null | массив из двух периодов (для intent=compare_periods),
   ""filters"": null | {{""city"":""..."", ""status"":""...""}},
   ""visualization_hint"": ""bar"" | ""line"" | ""pie"" | ""table"",

@@ -6,6 +6,8 @@
 @inject NlSqlEngine Engine
 @inject ReportService Reports
 @inject IJSRuntime JS
+@inject WorkspaceSessionState WorkspaceState
+@implements IDisposable
 
 <PageTitle>Drivee BI · Чат с данными</PageTitle>
 
@@ -38,7 +40,7 @@
         <div class="bi-reports-list">
             @if (_reports.Count == 0)
             {
-                <div class="bi-muted">Сохраните первый отчёт</div>
+                <div class="bi-muted">Тут будут появляться ваши сохраненные отчеты </div>
             }
             else
             {
@@ -141,7 +143,7 @@
                     }
                 </button>
             </div>
-            <div class="bi-chat-hint">LLM интерпретирует смысл → SQL строится программно из шаблонов · guardrails: read-only SELECT, LIMIT, таймаут</div>
+            <div class="bi-chat-hint">Вы задаёте вопрос — система сама находит нужные данные и визуализирует результат (работает только с чтением данных)</div>
         </div>
     </main>
 </div>
@@ -150,10 +152,18 @@
     private const string ReasoningTab = "reasoning";
     private const string SqlTab = "sql";
 
-    private string _query = "";
-    private bool _busy;
+    private string _query
+    {
+        get => WorkspaceState.Query;
+        set => WorkspaceState.Query = value;
+    }
+    private bool _busy
+    {
+        get => WorkspaceState.Busy;
+        set => WorkspaceState.Busy = value;
+    }
     private string _thinkingLabel = "Думаю…";
-    private List<ChatMsg> _messages = new();
+    private List<WorkspaceChatMessage> _messages => WorkspaceState.Messages;
     private List<Report> _reports = new();
     private int _lastRenderedCount;
 
@@ -168,20 +178,18 @@
         "Среднее расстояние и длительность поездок"
     };
 
-    private class ChatMsg
+    private sealed class ChatMsg : WorkspaceChatMessage { }
+
+    protected override void OnInitialized()
     {
-        public string Id { get; } = Guid.NewGuid().ToString("N");
-        public string Role { get; set; } = "user";
-        public string? Text { get; set; }
-        public PipelineResult? Result { get; set; }
-        public string Visualization { get; set; } = "table";
-        public string ReportName { get; set; } = "";
-        public string? SavedAs { get; set; }
-        public string? InsightTab { get; set; }
-        public bool DetailsOpen { get; set; }
+        WorkspaceState.Changed += OnWorkspaceChanged;
+        _thinkingLabel = WorkspaceState.ThinkingLabel;
+        RefreshReports();
     }
 
-    protected override void OnInitialized() => RefreshReports();
+    private void OnWorkspaceChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => WorkspaceState.Changed -= OnWorkspaceChanged;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -213,10 +221,11 @@
     private async Task RunQuery(string q)
     {
         if (_busy) return;
-        _messages.Add(new ChatMsg { Role = "user", Text = q });
+        _messages.Add(new WorkspaceChatMessage { Role = "user", Text = q });
         _busy = true;
         _thinkingLabel = "Интерпретирую запрос…";
-        StateHasChanged();
+        WorkspaceState.ThinkingLabel = _thinkingLabel;
+        WorkspaceState.NotifyChanged();
 
         var history = BuildHistory();
         var prevIntent = _messages
@@ -227,7 +236,7 @@
         var pr = await Engine.RunAsync(q, history, prevIntent);
         pr.UserQuery = q;
 
-        var msg = new ChatMsg();
+        var msg = new WorkspaceChatMessage();
         if (pr.IsChat)
         {
             msg.Role = "chat";
@@ -242,6 +251,8 @@
         }
         _messages.Add(msg);
         _busy = false;
+        WorkspaceState.ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
+        WorkspaceState.NotifyChanged();
     }
 
     private void UseTemplate(string t) => _query = t;
@@ -263,15 +274,11 @@
         return turns;
     }
 
-    private void ClearChat()
-    {
-        _messages.Clear();
-        _query = "";
-    }
+    private void ClearChat() => WorkspaceState.ClearChat();
 
-    private void SwitchViz(ChatMsg m, string v) => m.Visualization = v;
+    private void SwitchViz(WorkspaceChatMessage m, string v) => m.Visualization = v;
 
-    private void SaveReport(ChatMsg m)
+    private void SaveReport(WorkspaceChatMessage m)
     {
         if (m.Result?.Intent == null || m.Result.Sql == null) return;
         var r = new Report
@@ -318,10 +325,10 @@
         RefreshReports();
     }
 
-    private void ToggleInsightTab(ChatMsg m, string tab) =>
+    private void ToggleInsightTab(WorkspaceChatMessage m, string tab) =>
         m.InsightTab = string.Equals(m.InsightTab, tab, StringComparison.Ordinal) ? null : tab;
 
-    private static string GetInsightTabClass(ChatMsg m, string tab) =>
+    private static string GetInsightTabClass(WorkspaceChatMessage m, string tab) =>
         string.Equals(m.InsightTab, tab, StringComparison.Ordinal) ? "bi-insight-tab active" : "bi-insight-tab";
 
     private static string SuggestName(PipelineResult pr)
@@ -329,7 +336,8 @@
         if (pr.Intent == null) return pr.UserQuery;
         var parts = new List<string> { pr.Intent.Metric };
         if (!string.IsNullOrEmpty(pr.Intent.GroupBy)) parts.Add($"× {pr.Intent.GroupBy}");
-        if (!string.IsNullOrEmpty(pr.Intent.Period)) parts.Add(pr.Intent.Period!);
+        if (!string.IsNullOrEmpty(pr.Intent.Period))
+            parts.Add(PeriodResolver.Resolve(pr.Intent.Period)?.Label ?? pr.Intent.Period!);
         return string.Join(" ", parts);
     }
 
@@ -345,7 +353,7 @@
         _ => v.ToString() ?? ""
     };
 
-    private RenderFragment RenderResult(ChatMsg m) => builder =>
+    private RenderFragment RenderResult(WorkspaceChatMessage m) => builder =>
     {
         var pr = m.Result!;
         var seq = 0;

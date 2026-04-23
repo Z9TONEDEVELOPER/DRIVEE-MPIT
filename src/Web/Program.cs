@@ -14,10 +14,12 @@ builder.Services.AddRazorComponents()
 builder.Services.AddHttpClient("llm");
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
+builder.Services.AddSingleton<AnalyticsTimeService>();
 builder.Services.AddSingleton<SqlBuilder>();
 builder.Services.AddSingleton<QueryExecutor>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddScoped<NlSqlEngine>();
+builder.Services.AddScoped<WorkspaceSessionState>();
 builder.Services.AddSingleton<ReportService>();
 
 var app = builder.Build();
