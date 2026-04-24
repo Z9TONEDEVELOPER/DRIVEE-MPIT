@@ -237,7 +237,7 @@ public class SemanticLayer
 
         Dimensions = new List<DimensionDefinition>
         {
-            new("order", "по заказам", "order_id", false, OrdersSource, new[] { "order", "order_id", "заказ", "заказам", "по заказам" }),
+            new("order", "по заказам", "order_id", false, OrdersSource, new[] { "order", "order_id", "id заказа", "идентификатор заказа", "по заказам" }),
             new("day", "по дням", "date({date_column})", true, OrdersSource, new[] { "day", "date", "день", "дням", "по дням", "дата" }),
             new("week", "по неделям", "strftime('%Y-W%W', {date_column})", true, OrdersSource, new[] { "week", "неделя", "неделям", "по неделям" }),
             new("month", "по месяцам", "strftime('%Y-%m', {date_column})", true, OrdersSource, new[] { "month", "месяц", "месяцам", "по месяцам" }),

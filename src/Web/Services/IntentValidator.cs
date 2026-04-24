@@ -610,6 +610,16 @@ public class IntentValidator
             "price_order_local",
             @"(?:сумм\w*|цен\w*|стоимост\w*|чек\w*|руб\w*)\D{0,24}(?<operator>больше|более|выше|дороже|от|>=|>|меньше|менее|ниже|дешевле|до|<=|<)\D{0,12}(?<value>\d+(?:[\s\u00A0]\d{3})*(?:[,.]\d+)?)");
 
+        if (LooksLikeOrderListWithPriceFilter(text, canonicalIntent.Filters))
+        {
+            canonicalIntent.Metric = "order_price";
+            canonicalIntent.Visualization = "table";
+            if (canonicalIntent.Dimensions.All(dimension => !dimension.Equals("order", StringComparison.OrdinalIgnoreCase)))
+                canonicalIntent.Dimensions.Add("order");
+            if (canonicalIntent.Sort.Count == 0)
+                canonicalIntent.Sort.Add(new QuerySort { Field = "metric", Direction = "desc" });
+        }
+
         if (text.Contains("pie", StringComparison.OrdinalIgnoreCase) || text.Contains("круг", StringComparison.OrdinalIgnoreCase))
             canonicalIntent.Visualization ??= "pie";
     }
@@ -620,6 +630,19 @@ public class IntentValidator
         normalized = Regex.Replace(normalized, @"\s+", " ", RegexOptions.CultureInvariant).Trim();
 
         return normalized is "продажи" or "покажи продажи" or "показать продажи" or "продажы" or "sales" or "show sales";
+    }
+
+    private static bool LooksLikeOrderListWithPriceFilter(string text, IReadOnlyList<IntentFilter> filters)
+    {
+        if (!filters.Any(filter => string.Equals(filter.Field, "price_order_local", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        return (text.Contains("покажи", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("показать", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("show", StringComparison.OrdinalIgnoreCase)) &&
+               (text.Contains("заказы", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("заказов", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("orders", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void AddNumericFilterFromText(
