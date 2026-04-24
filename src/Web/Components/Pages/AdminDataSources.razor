@@ -1,0 +1,424 @@
+@page "/admin/data-sources"
+@attribute [Authorize(Roles = AppRoles.Admin)]
+@rendermode InteractiveServer
+@inject DataSourceService DataSources
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Drivee BI · Data sources</PageTitle>
+
+<div class="bi-workspace">
+    <aside class="bi-sidebar">
+        <div class="bi-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-sub">NL → SQL аналитика</div>
+            </div>
+        </div>
+
+        <div class="bi-user-card">
+            <div class="bi-user-label">Сеанс</div>
+            <div class="bi-user-name">@_displayName</div>
+            <div class="bi-user-meta">@_username · Администратор</div>
+            <form method="post" action="/auth/logout">
+                <button type="submit" class="bi-logout-btn">Выйти</button>
+            </form>
+        </div>
+
+        <nav class="bi-nav">
+            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
+            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
+            <a class="bi-nav-link" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
+            <a class="bi-nav-link active" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
+        </nav>
+    </aside>
+
+    <main class="bi-chat-main">
+        <header class="bi-chat-header">
+            <div>
+                <h1>Источники данных компании</h1>
+                <div class="bi-tagline">Администратор подключает БД, проверяет схему и публикует semantic layer. Аналитики работают только с активным, утверждённым источником.</div>
+            </div>
+        </header>
+
+        <div class="bi-reports-body">
+            @if (!string.IsNullOrWhiteSpace(_notice))
+            {
+                <div class="admin-notice">@_notice</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="admin-error">@_error</div>
+            }
+
+            <div class="datasource-layout">
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>Подключения</h2>
+                            <div class="bi-tagline">Активным может быть только один источник. Встроенный Drivee остаётся fallback-демо.</div>
+                        </div>
+                        <button type="button" class="bi-btn" @onclick="NewSource">Новый источник</button>
+                    </div>
+
+                    <div class="bi-card bi-card-table">
+                        <table class="bi-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Источник</th>
+                                    <th>Provider</th>
+                                    <th>Статус</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in _items)
+                                {
+                                    <tr class="@(item.Id == _input.Id ? "datasource-selected" : "")">
+                                        <td>@item.Id</td>
+                                        <td>
+                                            <div class="admin-user-name">@item.Name</div>
+                                            <div class="admin-user-sub">@(item.IsBuiltin ? "встроенный demo source" : "company source")</div>
+                                        </td>
+                                        <td>@item.Provider</td>
+                                        <td>
+                                            @if (item.IsActive)
+                                            {
+                                                <span class="admin-role admin">active</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="admin-role user">draft</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <button type="button" class="bi-btn ghost" @onclick="() => Edit(item)">Открыть</button>
+                                            @if (!item.IsActive)
+                                            {
+                                                <button type="button" class="bi-btn" @onclick="() => Activate(item.Id)">Активировать</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>@(_input.Id.HasValue ? "Настройка источника" : "Новый источник")</h2>
+                            <div class="bi-tagline">LLM видит только semantic layer, а SQL строится кодом из подтверждённых метрик и полей.</div>
+                        </div>
+                    </div>
+
+                    <div class="bi-card datasource-form" @key="_formKey">
+                        @if (_selectedIsBuiltin)
+                        {
+                            <div class="datasource-readonly-note">
+                                Это встроенный demo-источник. Его можно проверить и проанализировать, но редактирование отключено. Для настройки своей БД создайте новый источник или копию demo-source.
+                            </div>
+                        }
+
+                        <label>
+                            Название
+                            <input class="auth-input" @bind="_input.Name" @bind:event="oninput" disabled="@_selectedIsBuiltin" />
+                        </label>
+
+                        <label>
+                            Provider
+                            <select class="auth-input" @bind="_input.Provider" disabled="@_selectedIsBuiltin">
+                                @foreach (var provider in DataSourceProviders.All)
+                                {
+                                    <option value="@provider">@provider</option>
+                                }
+                            </select>
+                        </label>
+
+                        <label>
+                            Строка подключения
+                            <textarea class="auth-input auth-textarea datasource-connection" @bind="_input.ConnectionString" @bind:event="oninput" disabled="@_selectedIsBuiltin"></textarea>
+                        </label>
+
+                        <label class="datasource-check">
+                            <input type="checkbox" @bind="_input.MakeActive" disabled="@_selectedIsBuiltin" />
+                            Сделать активным после сохранения
+                        </label>
+
+                        <label>
+                            Semantic layer JSON
+                            <textarea class="auth-input datasource-semantic" @bind="_input.SemanticJson" @bind:event="oninput" disabled="@_selectedIsBuiltin"></textarea>
+                        </label>
+
+                        <div class="datasource-actions">
+                            @if (_selectedIsBuiltin)
+                            {
+                                <button type="button" class="bi-btn" @onclick="CloneSelectedAsNew" disabled="@_busy">Создать копию для редактирования</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="bi-btn" @onclick="Save" disabled="@_busy">Сохранить</button>
+                            }
+                            <button type="button" class="bi-btn ghost" @onclick="TestSelected" disabled="@(_busy || !_input.Id.HasValue)">Проверить</button>
+                            <button type="button" class="bi-btn ghost" @onclick="InspectSelected" disabled="@(_busy || !_input.Id.HasValue)">Анализ схемы</button>
+                            <button type="button" class="bi-btn ghost" @onclick="GenerateDraft" disabled="@(_busy || !_input.Id.HasValue)">Сгенерировать draft semantic</button>
+                            @if (_input.Id.HasValue && !_selectedIsBuiltin && !_selectedIsActive)
+                            {
+                                <button type="button" class="bi-btn danger" @onclick="DeleteSelected" disabled="@_busy">Удалить</button>
+                            }
+                        </div>
+
+                        @if (_testResult != null)
+                        {
+                            <div class="@(_testResult.Ok ? "admin-notice compact" : "admin-error compact")">@_testResult.Message</div>
+                        }
+                    </div>
+
+                    @if (_schema != null)
+                    {
+                        <div class="bi-card bi-card-table datasource-schema">
+                            <table class="bi-table">
+                                <thead>
+                                    <tr>
+                                        <th>Таблица</th>
+                                        <th>Строк</th>
+                                        <th>Колонки</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var table in _schema.Tables)
+                                    {
+                                        <tr>
+                                            <td>@FormatTableName(table)</td>
+                                            <td>@(table.EstimatedRows?.ToString() ?? "—")</td>
+                                            <td>@string.Join(", ", table.Columns.Select(column => $"{column.Name}:{column.DataType}"))</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+            </div>
+        </div>
+    </main>
+</div>
+
+@code {
+    private List<CompanyDataSource> _items = new();
+    private DataSourceInput _input = new();
+    private DataSourceTestResult? _testResult;
+    private SchemaInspectionResult? _schema;
+    private string _username = "";
+    private string _displayName = "";
+    private bool _busy;
+    private bool _selectedIsBuiltin;
+    private bool _selectedIsActive;
+    private string _formKey = Guid.NewGuid().ToString("N");
+    private string? _notice;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _username = authState.User.GetUsername();
+        _displayName = authState.User.GetDisplayName();
+        Refresh();
+        Edit(_items.FirstOrDefault(item => item.IsActive) ?? _items.FirstOrDefault());
+    }
+
+    private void Refresh() => _items = DataSources.List();
+
+    private void NewSource()
+    {
+        _input = new DataSourceInput { Provider = DataSourceProviders.Sqlite };
+        _selectedIsBuiltin = false;
+        _selectedIsActive = false;
+        _testResult = null;
+        _schema = null;
+        _notice = null;
+        _error = null;
+        ResetFormKey();
+    }
+
+    private void Edit(CompanyDataSource? source)
+    {
+        if (source == null)
+        {
+            NewSource();
+            return;
+        }
+
+        _input = new DataSourceInput
+        {
+            Id = source.Id,
+            Name = source.Name,
+            Provider = source.Provider,
+            ConnectionString = source.ConnectionString,
+            SemanticJson = source.SemanticJson ?? "",
+            MakeActive = source.IsActive
+        };
+        _selectedIsBuiltin = source.IsBuiltin;
+        _selectedIsActive = source.IsActive;
+        _testResult = null;
+        _schema = string.IsNullOrWhiteSpace(source.SchemaJson)
+            ? null
+            : System.Text.Json.JsonSerializer.Deserialize<SchemaInspectionResult>(source.SchemaJson, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        _notice = null;
+        _error = null;
+        ResetFormKey();
+    }
+
+    private void CloneSelectedAsNew()
+    {
+        var sourceName = string.IsNullOrWhiteSpace(_input.Name)
+            ? "Company data source"
+            : $"{_input.Name} custom";
+
+        _input = new DataSourceInput
+        {
+            Name = sourceName,
+            Provider = _input.Provider,
+            ConnectionString = _input.ConnectionString,
+            SemanticJson = _input.SemanticJson,
+            MakeActive = false
+        };
+        _selectedIsBuiltin = false;
+        _selectedIsActive = false;
+        _testResult = null;
+        _notice = "Создана редактируемая копия. Проверьте строку подключения и semantic layer, затем сохраните источник.";
+        _error = null;
+        ResetFormKey();
+    }
+
+    private void Save()
+    {
+        RunAdminAction(() =>
+        {
+            var id = DataSources.Save(_input);
+            Refresh();
+            Edit(_items.First(item => item.Id == id));
+            _notice = "Источник данных сохранён.";
+        });
+    }
+
+    private void Activate(int id)
+    {
+        RunAdminAction(() =>
+        {
+            DataSources.Activate(id);
+            Refresh();
+            Edit(_items.First(item => item.Id == id));
+            _notice = "Источник данных активирован.";
+        });
+    }
+
+    private void DeleteSelected()
+    {
+        if (_input.Id is not int id)
+            return;
+
+        RunAdminAction(() =>
+        {
+            DataSources.Delete(id);
+            Refresh();
+            Edit(_items.FirstOrDefault(item => item.IsActive) ?? _items.FirstOrDefault());
+            _notice = "Источник данных удалён.";
+        });
+    }
+
+    private void TestSelected()
+    {
+        if (_input.Id is not int id)
+            return;
+
+        RunAdminAction(() =>
+        {
+            _testResult = DataSources.Test(id);
+            Refresh();
+        });
+    }
+
+    private void InspectSelected()
+    {
+        if (_input.Id is not int id)
+            return;
+
+        RunAdminAction(() =>
+        {
+            _schema = DataSources.InspectSchema(id);
+            Refresh();
+            _notice = $"Схема прочитана: {_schema.Tables.Count} таблиц.";
+        });
+    }
+
+    private void GenerateDraft()
+    {
+        if (_input.Id is not int id)
+            return;
+
+        RunAdminAction(() =>
+        {
+            var semanticDraft = DataSources.BuildSemanticDraftFromLastSchema(id);
+
+            if (_selectedIsBuiltin)
+            {
+                var sourceName = string.IsNullOrWhiteSpace(_input.Name)
+                    ? "Company data source"
+                    : $"{_input.Name} custom";
+
+                _input = new DataSourceInput
+                {
+                    Name = sourceName,
+                    Provider = _input.Provider,
+                    ConnectionString = _input.ConnectionString,
+                    SemanticJson = semanticDraft,
+                    MakeActive = false
+                };
+                _selectedIsBuiltin = false;
+                _selectedIsActive = false;
+                _testResult = null;
+                _notice = "Draft semantic layer создан в новой редактируемой копии demo-source. Проверьте бизнес-смысл и сохраните источник.";
+            }
+            else
+            {
+                _input.SemanticJson = semanticDraft;
+                _notice = "Draft semantic layer создан. Проверьте бизнес-смысл перед сохранением и активацией.";
+            }
+
+            ResetFormKey();
+        });
+    }
+
+    private void ResetFormKey() => _formKey = Guid.NewGuid().ToString("N");
+
+    private static string FormatTableName(SchemaTableInfo table) =>
+        string.IsNullOrWhiteSpace(table.SchemaName)
+            ? table.Name
+            : $"{table.SchemaName}.{table.Name}";
+
+    private void RunAdminAction(Action action)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            action();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.Data.Common.DbException or IOException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

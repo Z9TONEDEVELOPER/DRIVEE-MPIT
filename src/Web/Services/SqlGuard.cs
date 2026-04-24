@@ -9,6 +9,9 @@ public sealed record SqlGuardReport(
 
 public class SqlGuard
 {
+    private const string IdentifierPattern = @"""(?:""""|[^""])+""|[A-Za-z_][A-Za-z0-9_]*";
+    private const string IdentifierPathPattern = @"(?:" + IdentifierPattern + @")(?:\s*\.\s*(?:" + IdentifierPattern + @"))*";
+
     private static readonly string[] ForbiddenKeywords =
     {
         "drop", "delete", "update", "insert", "alter", "create", "truncate",
@@ -19,7 +22,7 @@ public class SqlGuard
     {
         "select", "from", "where", "group", "by", "order", "limit", "as", "and", "or", "in", "not", "null",
         "union", "all", "case", "when", "then", "else", "end", "round", "count", "sum", "avg", "max", "cast", "strftime",
-        "date", "integer", "asc", "desc", "nullif", "on"
+        "date", "integer", "numeric", "asc", "desc", "nullif", "on", "date_trunc", "extract", "epoch"
     };
 
     private readonly SemanticLayer _semanticLayer;
@@ -66,23 +69,31 @@ public class SqlGuard
             return new SqlGuardReport(false, $"LIMIT должен быть в диапазоне 1..{_maxRows}.", checks);
         checks.Add("bounded_limit");
 
-        var allowedTables = _semanticLayer.Sources.Select(source => source.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var referencedTables = Regex.Matches(trimmedSql, @"\b(?:from|join)\s+([a-z_][a-z0-9_]*)\b", RegexOptions.IgnoreCase)
-            .Select(match => match.Groups[1].Value)
+        var allowedTables = _semanticLayer.Sources
+            .Select(source => NormalizeIdentifierPath(source.Table))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var referencedTables = Regex.Matches(
+                trimmedSql,
+                $@"\b(?:from|join)\s+({IdentifierPathPattern})",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            .Select(match => NormalizeIdentifierPath(match.Groups[1].Value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (referencedTables.Any(table => !allowedTables.Contains(table)))
             return new SqlGuardReport(false, $"Обнаружена неизвестная таблица: {string.Join(", ", referencedTables.Where(table => !allowedTables.Contains(table)))}.", checks);
         checks.Add("known_tables");
 
-        var sanitizedSql = Regex.Replace(trimmedSql, @"'[^']*'", " ", RegexOptions.CultureInvariant);
-        var parameterNames = parameters.Keys.Select(key => key.TrimStart('$')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var sanitizedSql = StripQuotedContent(trimmedSql);
+        var parameterNames = parameters.Keys.Select(key => key.TrimStart('$', '@', ':')).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var allowedFields = new HashSet<string>(intent.Source.AllowedColumns, StringComparer.OrdinalIgnoreCase)
         {
             intent.Metric.Key,
             "period",
             "__sort"
         };
+
+        foreach (var tablePart in SplitIdentifierPath(NormalizeIdentifierPath(intent.Source.Table)))
+            allowedFields.Add(tablePart);
 
         foreach (var dimension in intent.Dimensions)
         {
@@ -111,6 +122,29 @@ public class SqlGuard
         checks.Add("bounded_complexity");
 
         return new SqlGuardReport(true, null, checks);
+    }
+
+    private static string NormalizeIdentifierPath(string identifierPath)
+    {
+        var parts = Regex.Matches(identifierPath, IdentifierPattern, RegexOptions.CultureInvariant)
+            .Select(match => UnquoteIdentifier(match.Value.Trim()))
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+
+        return parts.Count == 0 ? identifierPath.Trim() : string.Join(".", parts);
+    }
+
+    private static IEnumerable<string> SplitIdentifierPath(string identifierPath) =>
+        identifierPath
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !string.IsNullOrWhiteSpace(part));
+
+    private static string UnquoteIdentifier(string identifier)
+    {
+        if (identifier.Length >= 2 && identifier[0] == '"' && identifier[^1] == '"')
+            return identifier[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+
+        return identifier;
     }
 
     private static string StripQuotedContent(string sql)

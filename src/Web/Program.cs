@@ -27,6 +27,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddHttpClient("llm");
+builder.Services.AddSingleton<DataSourceService>();
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
 builder.Services.AddSingleton<AnalyticsTimeService>();
@@ -45,6 +46,7 @@ builder.Services.AddSingleton<ReportService>();
 
 var app = builder.Build();
 
+_ = app.Services.GetRequiredService<DataSourceService>();
 app.Services.GetRequiredService<DatasetSeeder>().EnsureSeeded();
 _ = app.Services.GetRequiredService<ReportService>();
 _ = app.Services.GetRequiredService<UserService>();

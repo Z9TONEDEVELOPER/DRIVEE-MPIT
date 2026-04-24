@@ -327,10 +327,11 @@ h1:focus {
 .bi-page-body .bi-card { padding: 0; overflow: hidden; }
 .bi-page-body .bi-card .bi-table { margin: 0; }
 .bi-empty { padding: 30px; background: white; border: 1px dashed #cbd5e1; border-radius: 8px; text-align: center; color: #64748b; }
-.bi-btn { background: #4f46e5; color: white; border: none; padding: 5px 12px; border-radius: 5px; font-size: 12px; cursor: pointer; margin-right: 4px; }
-.bi-btn.ghost { background: #f1f5f9; color: #475569; }
+.bi-btn { background: #4f46e5; color: white; border: 1px solid transparent; padding: 5px 12px; border-radius: 5px; font-size: 12px; cursor: pointer; margin-right: 4px; }
+.bi-btn.ghost { background: #ffffff; color: #334155; border-color: #cbd5e1; }
+.bi-btn.ghost:hover:not(:disabled) { background: #eef2ff; border-color: #a5b4fc; color: #3730a3; }
 .bi-btn.danger { background: #dc2626; }
-.bi-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.bi-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.2); }
 
 /* ================= Chat UI ================= */
 .bi-new-chat {
@@ -905,6 +906,76 @@ h1:focus {
     color: #0f766e;
 }
 
+.datasource-layout {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr);
+    gap: 22px;
+}
+
+.datasource-form {
+    display: grid;
+    gap: 14px;
+}
+
+.datasource-form label {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.datasource-readonly-note {
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e3a8a;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.datasource-connection {
+    min-height: 74px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.datasource-semantic {
+    min-height: 320px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+.datasource-check {
+    display: flex !important;
+    align-items: center;
+    gap: 8px !important;
+    font-weight: 600 !important;
+}
+
+.datasource-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.datasource-actions .bi-btn {
+    margin-right: 0;
+}
+
+.datasource-selected {
+    background: #f8fafc;
+}
+
+.datasource-schema {
+    margin-top: 16px;
+}
+
+.admin-notice.compact,
+.admin-error.compact {
+    margin: 0;
+}
+
 @media (max-width: 960px) {
     .bi-workspace {
         grid-template-columns: 1fr;
@@ -917,6 +988,10 @@ h1:focus {
     }
 
     .admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .datasource-layout {
         grid-template-columns: 1fr;
     }
 }

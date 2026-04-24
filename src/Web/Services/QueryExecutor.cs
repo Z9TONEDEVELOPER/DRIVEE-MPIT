@@ -1,24 +1,22 @@
 using System.Diagnostics;
 using DriveeDataSpace.Web.Models;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 
 namespace DriveeDataSpace.Web.Services;
 
 public class QueryExecutor
 {
-    private readonly string _dbPath;
     private readonly int _timeoutSeconds;
     private readonly int _maxRows;
     private readonly SqlGuard _sqlGuard;
+    private readonly DataSourceService _dataSources;
 
-    public QueryExecutor(IConfiguration configuration, IHostEnvironment environment, SqlGuard sqlGuard)
+    public QueryExecutor(IConfiguration configuration, SqlGuard sqlGuard, DataSourceService dataSources)
     {
-        _dbPath = DataPathResolver.Resolve(environment, configuration["Data:AnalyticsDb"], "Data/drivee.db");
         _timeoutSeconds = int.TryParse(configuration["Data:CommandTimeoutSeconds"], out var timeoutSeconds) ? timeoutSeconds : 15;
         _maxRows = int.TryParse(configuration["Data:MaxRows"], out var maxRows) ? maxRows : 10000;
         _sqlGuard = sqlGuard;
+        _dataSources = dataSources;
     }
 
     public QueryResult Execute(BuiltSql builtSql, ValidatedIntent intent)
@@ -27,21 +25,19 @@ public class QueryExecutor
         if (!guardReport.Ok)
             throw new InvalidOperationException($"Guardrails: {guardReport.Reason}");
 
-        var connectionStringBuilder = new SqliteConnectionStringBuilder
-        {
-            DataSource = _dbPath,
-            Mode = SqliteOpenMode.ReadOnly
-        };
-
-        using var connection = new SqliteConnection(connectionStringBuilder.ConnectionString);
-        connection.Open();
-
+        var activeDataSource = _dataSources.GetActive();
+        using var connection = _dataSources.OpenReadOnlyConnection(activeDataSource);
         using var command = connection.CreateCommand();
         command.CommandText = builtSql.Sql;
         command.CommandTimeout = _timeoutSeconds;
 
         foreach (var parameter in builtSql.Parameters)
-            command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
+        {
+            var dbParameter = command.CreateParameter();
+            dbParameter.ParameterName = parameter.Key;
+            dbParameter.Value = parameter.Value ?? DBNull.Value;
+            command.Parameters.Add(dbParameter);
+        }
 
         var stopwatch = Stopwatch.StartNew();
         using var reader = command.ExecuteReader();

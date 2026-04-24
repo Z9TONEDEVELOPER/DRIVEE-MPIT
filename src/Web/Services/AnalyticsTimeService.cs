@@ -1,6 +1,4 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+using System.Text.RegularExpressions;
 
 namespace DriveeDataSpace.Web.Services;
 
@@ -12,17 +10,17 @@ public sealed record AnalyticsTimeContext(
 
 public class AnalyticsTimeService
 {
-    private readonly string _dbPath;
+    private readonly DataSourceService _dataSources;
 
-    public AnalyticsTimeService(IConfiguration config, IHostEnvironment environment)
+    public AnalyticsTimeService(DataSourceService dataSources)
     {
-        _dbPath = DataPathResolver.Resolve(environment, config["Data:AnalyticsDb"], "Data/drivee.db");
+        _dataSources = dataSources;
     }
 
-    public AnalyticsTimeContext GetContext()
+    public AnalyticsTimeContext GetContext(string? table = null, string? dateColumn = null)
     {
         var systemToday = DateTime.UtcNow.Date;
-        var latestDataTimestamp = TryGetLatestOrderTimestampUtc();
+        var latestDataTimestamp = TryGetLatestTimestampUtc(table, dateColumn);
         var anchorDate = latestDataTimestamp.HasValue && latestDataTimestamp.Value.Date < systemToday
             ? latestDataTimestamp.Value.Date
             : systemToday;
@@ -34,22 +32,18 @@ public class AnalyticsTimeService
             latestDataTimestamp.HasValue && latestDataTimestamp.Value.Date < systemToday);
     }
 
-    private DateTime? TryGetLatestOrderTimestampUtc()
+    private DateTime? TryGetLatestTimestampUtc(string? table, string? dateColumn)
     {
+        if (!IsSafeIdentifier(table) || !IsSafeIdentifier(dateColumn))
+            return null;
+
         try
         {
-            var csb = new SqliteConnectionStringBuilder
-            {
-                DataSource = _dbPath,
-                Mode = SqliteOpenMode.ReadOnly
-            };
-
-            using var conn = new SqliteConnection(csb.ConnectionString);
-            conn.Open();
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT MAX(order_timestamp) FROM orders";
-            var value = cmd.ExecuteScalar()?.ToString();
+            var dataSource = _dataSources.GetActive();
+            using var connection = _dataSources.OpenReadOnlyConnection(dataSource);
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT MAX({dateColumn}) FROM {table}";
+            var value = command.ExecuteScalar()?.ToString();
 
             return DateTime.TryParse(value, out var parsed)
                 ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
@@ -60,4 +54,11 @@ public class AnalyticsTimeService
             return null;
         }
     }
+
+    private static bool IsSafeIdentifier(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        Regex.IsMatch(
+            value,
+            @"^\s*(?:""(?:""""|[^""])+""|[A-Za-z_][A-Za-z0-9_]*)(?:\s*\.\s*(?:""(?:""""|[^""])+""|[A-Za-z_][A-Za-z0-9_]*))*\s*$",
+            RegexOptions.CultureInvariant);
 }

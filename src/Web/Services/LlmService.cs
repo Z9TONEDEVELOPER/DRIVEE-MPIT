@@ -670,9 +670,23 @@ public static class PromptTemplates
 {
     public static string SystemPrompt(SemanticLayer semanticLayer)
     {
-        var metrics = string.Join(", ", semanticLayer.Metrics.Select(metric => $"{metric.Key} [{string.Join(", ", metric.Synonyms.Take(4))}]"));
-        var dimensions = string.Join(", ", semanticLayer.Dimensions.Select(dimension => $"{dimension.Key} [{string.Join(", ", dimension.Synonyms.Take(3))}]"));
-        var filters = string.Join(", ", semanticLayer.Filters.Select(filter => $"{filter.Key} [{string.Join(", ", filter.Synonyms.Take(3))}]"));
+        var metrics = string.Join(Environment.NewLine, semanticLayer.Metrics.Select(metric =>
+            $"- {metric.Key}: {metric.DisplayLabel}; aggregation={metric.Aggregation}; source={metric.Source}; date_column={metric.DateColumn}; synonyms=[{string.Join(", ", metric.Synonyms.Take(8))}]"));
+        var dimensions = string.Join(Environment.NewLine, semanticLayer.Dimensions.Select(dimension =>
+            $"- {dimension.Key}: {dimension.DisplayLabel}; source={dimension.Source}; synonyms=[{string.Join(", ", dimension.Synonyms.Take(6))}]"));
+        var filters = string.Join(Environment.NewLine, semanticLayer.Filters.Select(filter =>
+            $"- {filter.Key}: {filter.DisplayLabel}; operators=[{string.Join(", ", filter.AllowedOperators)}]; synonyms=[{string.Join(", ", filter.Synonyms.Take(6))}]"));
+        var sources = string.Join(Environment.NewLine, semanticLayer.Sources.Select(source =>
+            $"- {source.Key}: table={source.Table}; columns=[{string.Join(", ", source.AllowedColumns.Take(40))}]"));
+        var presets = semanticLayer.Presets.Count == 0
+            ? "- нет специальных presets; используй только метрики, dimensions и filters выше."
+            : string.Join(Environment.NewLine, semanticLayer.Presets.Select(preset =>
+                $"- если запрос похож на [{string.Join(", ", preset.Phrases.Take(5))}], metric={preset.Metric ?? "не менять"}, dimension={preset.Dimension ?? "не менять"}, filters=[{string.Join(", ", preset.Filters.Select(filter => $"{filter.Field} {filter.Operator} {IntentValueHelper.ToDisplayString(filter.Value)}"))}]"));
+        var dimensionKeys = string.Join("\" | \"", semanticLayer.Dimensions.Select(dimension => dimension.Key));
+        var filterKeys = string.Join("\" | \"", semanticLayer.Filters.Select(filter => filter.Key));
+        var sourceKeys = string.Join("\" | \"", semanticLayer.Sources.Select(source => source.Key));
+        var dateColumns = string.Join("\" | \"", semanticLayer.Metrics.Select(metric => metric.DateColumn).Distinct(StringComparer.OrdinalIgnoreCase));
+        var sortFields = string.Join("\" | \"", new[] { "metric", "period" }.Concat(semanticLayer.Dimensions.Select(dimension => dimension.Key)).Distinct(StringComparer.OrdinalIgnoreCase));
         return $@"Ты — NL parser для BI-сервиса Drivee. Твоя задача: извлечь смысл пользовательского запроса и вернуть только JSON intent.
 
 ВАЖНО:
@@ -691,6 +705,12 @@ public static class PromptTemplates
 Доступные filters:
 {filters}
 
+Доступные sources/tables:
+{sources}
+
+Business presets:
+{presets}
+
 Разрешённая схема:
 {{
   ""kind"": ""query"" | ""chat"" | ""clarify"",
@@ -699,10 +719,10 @@ public static class PromptTemplates
   ""intent"": ""metric_query"" | ""compare_periods"",
   ""metric"": string | null,
   ""aggregation"": ""count"" | ""sum"" | ""avg"" | ""max"" | ""formula"" | null,
-  ""dimensions"": [""order"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order""],
+  ""dimensions"": [""{dimensionKeys}""],
   ""filters"": [
     {{
-      ""field"": string,
+      ""field"": ""{filterKeys}"",
       ""operator"": ""="" | ""!="" | ""in"" | ""not_in"" | "">"" | "">="" | ""<"" | ""<="",
       ""value"": string | number | [string]
     }}
@@ -712,16 +732,16 @@ public static class PromptTemplates
     ""value"": number | null,
     ""start"": ""YYYY-MM-DD"" | null,
     ""end"": ""YYYY-MM-DD"" | null,
-    ""date_column"": ""order_timestamp"" | null
+    ""date_column"": ""{dateColumns}"" | null
   }} | null,
   ""sort"": [
     {{
-      ""field"": ""metric"" | ""period"" | ""order"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order"",
+      ""field"": ""{sortFields}"",
       ""direction"": ""asc"" | ""desc""
     }}
   ],
   ""limit"": number | null,
-  ""source"": ""orders"" | null,
+  ""source"": ""{sourceKeys}"" | null,
   ""comparison"": {{
     ""mode"": ""period_vs_period"",
     ""periods"": [{{ ""type"": ""..."", ""start"": ""..."", ""end"": ""..."" }}, {{ ""type"": ""..."", ""start"": ""..."", ""end"": ""..."" }}]
@@ -731,11 +751,9 @@ public static class PromptTemplates
 }}
 
 Дополнительные правила:
-- Для ""завершённых заказов"" используй metric=""orders_count"" и filter status_order = done.
-- Для ""отменённых заказов"" используй metric=""orders_count"" и filter status_order = cancelled.
-- Для ""продажи"" используй metric=""revenue_sum"".
-- Для ""самые дорогие заказы"" используй metric=""order_price"", dimension=""order"", sort metric desc и limit из запроса.
-- Для условий суммы/цены заказа используй filter price_order_local с оператором >, >=, < или <=.
+- Use only metric/dimension/filter/source keys from the semantic layer above.
+- If the business meaning is covered by Business presets, apply the matching metric, dimensions and filters.
+- Do not transfer Drivee-specific terms to another database unless those terms are explicitly present in semantic layer.
 - Для временного ряда используй visualization = line.
 - Для top N обычно нужен limit и sort по metric desc.
 - Для compare_periods можно заполнить periods или comparison.periods.

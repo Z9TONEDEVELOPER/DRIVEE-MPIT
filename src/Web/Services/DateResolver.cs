@@ -90,12 +90,12 @@ public class DateResolver
         };
     }
 
-    public ResolvedDateRange? Resolve(QueryDateRange? spec, string defaultDateColumn, DateTime? nowUtc = null)
+    public ResolvedDateRange? Resolve(QueryDateRange? spec, string defaultDateColumn, string? sourceTable = null, DateTime? nowUtc = null)
     {
         if (spec == null || string.IsNullOrWhiteSpace(spec.Type))
             return null;
 
-        var timeContext = _analyticsTimeService.GetContext();
+        var timeContext = _analyticsTimeService.GetContext(sourceTable, defaultDateColumn);
         var anchor = (nowUtc ?? timeContext.AnchorDateUtc).Date;
         var dateColumn = string.IsNullOrWhiteSpace(spec.DateColumn) ? defaultDateColumn : spec.DateColumn.Trim();
         var type = spec.Type.Trim().ToLowerInvariant();
@@ -121,7 +121,7 @@ public class DateResolver
         };
     }
 
-    public IReadOnlyList<ResolvedDateRange> ResolveComparisonPeriods(QueryIntent intent, string defaultDateColumn, DateTime? nowUtc = null)
+    public IReadOnlyList<ResolvedDateRange> ResolveComparisonPeriods(QueryIntent intent, string defaultDateColumn, string? sourceTable = null, DateTime? nowUtc = null)
     {
         var specs = new List<QueryDateRange>();
 
@@ -139,7 +139,7 @@ public class DateResolver
         }
 
         return specs
-            .Select(spec => Resolve(spec, defaultDateColumn, nowUtc))
+            .Select(spec => Resolve(spec, defaultDateColumn, sourceTable, nowUtc))
             .Where(range => range != null)
             .Cast<ResolvedDateRange>()
             .ToList();

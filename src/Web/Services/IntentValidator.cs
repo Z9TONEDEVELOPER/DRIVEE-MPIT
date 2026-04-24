@@ -255,10 +255,10 @@ public class IntentValidator
 
         var resolvedDateRange = canonicalIntent.Intent == QueryIntentKinds.ComparePeriods
             ? null
-            : _dateResolver.Resolve(dateRangeSpec, metricDefinition.DateColumn);
+            : _dateResolver.Resolve(dateRangeSpec, metricDefinition.DateColumn, sourceDefinition.Table);
 
         var comparisonRanges = canonicalIntent.Intent == QueryIntentKinds.ComparePeriods
-            ? _dateResolver.ResolveComparisonPeriods(canonicalIntent, metricDefinition.DateColumn)
+            ? _dateResolver.ResolveComparisonPeriods(canonicalIntent, metricDefinition.DateColumn, sourceDefinition.Table)
             : Array.Empty<ResolvedDateRange>();
 
         if (canonicalIntent.Intent == QueryIntentKinds.ComparePeriods && comparisonRanges.Count < 2)
@@ -518,7 +518,8 @@ public class IntentValidator
                 canonicalIntent.Limit = leadingTopN;
         }
 
-        if (text.Contains("продаж", StringComparison.OrdinalIgnoreCase) || text.Contains("sales", StringComparison.OrdinalIgnoreCase))
+        if (HasMetric("revenue_sum") &&
+            (text.Contains("продаж", StringComparison.OrdinalIgnoreCase) || text.Contains("sales", StringComparison.OrdinalIgnoreCase)))
         {
             canonicalIntent.Metric = "revenue_sum";
             if (!text.Contains("отмен", StringComparison.OrdinalIgnoreCase) &&
@@ -538,10 +539,12 @@ public class IntentValidator
             }
         }
 
-        if (text.Contains("самых дорог", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("самые дорог", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("дорогих заказ", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("expensive orders", StringComparison.OrdinalIgnoreCase))
+        if (HasMetric("order_price") &&
+            HasDimension("order") &&
+            (text.Contains("самых дорог", StringComparison.OrdinalIgnoreCase) ||
+             text.Contains("самые дорог", StringComparison.OrdinalIgnoreCase) ||
+             text.Contains("дорогих заказ", StringComparison.OrdinalIgnoreCase) ||
+             text.Contains("expensive orders", StringComparison.OrdinalIgnoreCase)))
         {
             ForceOrderPriceList(canonicalIntent);
         }
@@ -579,7 +582,9 @@ public class IntentValidator
             }
         }
 
-        if (canonicalIntent.Filters.Count == 0 && text.Contains("отмен", StringComparison.OrdinalIgnoreCase))
+        if (HasFilter("status_order") &&
+            canonicalIntent.Filters.Count == 0 &&
+            text.Contains("отмен", StringComparison.OrdinalIgnoreCase))
         {
             UpsertFilter(canonicalIntent.Filters, new IntentFilter
             {
@@ -589,7 +594,8 @@ public class IntentValidator
             });
         }
 
-        if (text.Contains("заверш", StringComparison.OrdinalIgnoreCase) || text.Contains("completed", StringComparison.OrdinalIgnoreCase) || text.Contains("done", StringComparison.OrdinalIgnoreCase))
+        if (HasFilter("status_order") &&
+            (text.Contains("заверш", StringComparison.OrdinalIgnoreCase) || text.Contains("completed", StringComparison.OrdinalIgnoreCase) || text.Contains("done", StringComparison.OrdinalIgnoreCase)))
         {
             UpsertFilter(canonicalIntent.Filters, new IntentFilter
             {
@@ -599,13 +605,18 @@ public class IntentValidator
             });
         }
 
-        AddNumericFilterFromText(
-            canonicalIntent.Filters,
-            text,
-            "price_order_local",
-            @"(?:сумм\w*|цен\w*|стоимост\w*|чек\w*|руб\w*)\D{0,24}(?<operator>больше|более|выше|дороже|от|>=|>|меньше|менее|ниже|дешевле|до|<=|<)\D{0,12}(?<value>\d+(?:[\s\u00A0]\d{3})*(?:[,.]\d+)?)");
+        if (HasFilter("price_order_local"))
+        {
+            AddNumericFilterFromText(
+                canonicalIntent.Filters,
+                text,
+                "price_order_local",
+                @"(?:сумм\w*|цен\w*|стоимост\w*|чек\w*|руб\w*)\D{0,24}(?<operator>больше|более|выше|дороже|от|>=|>|меньше|менее|ниже|дешевле|до|<=|<)\D{0,12}(?<value>\d+(?:[\s\u00A0]\d{3})*(?:[,.]\d+)?)");
+        }
 
-        if (LooksLikeOrderListWithPriceFilter(text, canonicalIntent.Filters))
+        if (HasMetric("order_price") &&
+            HasDimension("order") &&
+            LooksLikeOrderListWithPriceFilter(text, canonicalIntent.Filters))
         {
             ForceOrderPriceList(canonicalIntent);
         }
@@ -613,6 +624,12 @@ public class IntentValidator
         if (text.Contains("pie", StringComparison.OrdinalIgnoreCase) || text.Contains("круг", StringComparison.OrdinalIgnoreCase))
             canonicalIntent.Visualization ??= "pie";
     }
+
+    private bool HasMetric(string key) => _semanticLayer.ResolveMetric(key) != null;
+
+    private bool HasDimension(string key) => _semanticLayer.ResolveDimension(key) != null;
+
+    private bool HasFilter(string key) => _semanticLayer.ResolveFilter(key) != null;
 
     private static void ForceOrderPriceList(QueryIntent canonicalIntent)
     {

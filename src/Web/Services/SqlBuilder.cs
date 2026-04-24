@@ -10,14 +10,26 @@ public sealed record BuiltSql(
 
 public class SqlBuilder
 {
-    public BuiltSql Build(ValidatedIntent intent)
+    private readonly DataSourceService? _dataSources;
+
+    public SqlBuilder()
     {
-        return intent.ComparisonRanges.Count > 0
-            ? BuildComparisonQuery(intent)
-            : BuildMetricQuery(intent);
     }
 
-    private static BuiltSql BuildMetricQuery(ValidatedIntent intent)
+    public SqlBuilder(DataSourceService dataSources)
+    {
+        _dataSources = dataSources;
+    }
+
+    public BuiltSql Build(ValidatedIntent intent)
+    {
+        var dialect = SqlBuildDialect.For(_dataSources?.GetActive().Provider);
+        return intent.ComparisonRanges.Count > 0
+            ? BuildComparisonQuery(intent, dialect)
+            : BuildMetricQuery(intent, dialect);
+    }
+
+    private static BuiltSql BuildMetricQuery(ValidatedIntent intent, SqlBuildDialect dialect)
     {
         var sqlBuilder = new StringBuilder();
         var parameters = new Dictionary<string, object?>();
@@ -34,19 +46,19 @@ public class SqlBuilder
             sqlBuilder.Append(", ");
         }
 
-        sqlBuilder.Append($"{BuildMetricExpression(intent.Metric)} AS \"{intent.Metric.Key}\" ");
+        sqlBuilder.Append($"{BuildMetricExpression(intent.Metric, dialect)} AS \"{intent.Metric.Key}\" ");
         sqlBuilder.Append($"FROM {intent.Source.Table} ");
 
         if (intent.DateRange != null)
         {
-            var fromParameter = $"$p{parameterIndex++}";
-            var toParameter = $"$p{parameterIndex++}";
+            var fromParameter = dialect.ParameterName(parameterIndex++);
+            var toParameter = dialect.ParameterName(parameterIndex++);
             whereClauses.Add($"{intent.DateRange.DateColumn} >= {fromParameter} AND {intent.DateRange.DateColumn} < {toParameter}");
-            parameters[fromParameter] = intent.DateRange.FromUtc.ToString("yyyy-MM-dd HH:mm:ss");
-            parameters[toParameter] = intent.DateRange.ToExclusiveUtc.ToString("yyyy-MM-dd HH:mm:ss");
+            parameters[fromParameter] = dialect.DateParameter(intent.DateRange.FromUtc);
+            parameters[toParameter] = dialect.DateParameter(intent.DateRange.ToExclusiveUtc);
         }
 
-        AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex);
+        AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex, dialect);
 
         if (whereClauses.Count > 0)
             sqlBuilder.Append("WHERE ").Append(string.Join(" AND ", whereClauses)).Append(' ');
@@ -65,7 +77,7 @@ public class SqlBuilder
         return new BuiltSql(sql, parameters, BuildSignature(sql, parameters));
     }
 
-    private static BuiltSql BuildComparisonQuery(ValidatedIntent intent)
+    private static BuiltSql BuildComparisonQuery(ValidatedIntent intent, SqlBuildDialect dialect)
     {
         var innerSelects = new List<string>();
         var parameters = new Dictionary<string, object?>();
@@ -75,21 +87,21 @@ public class SqlBuilder
         {
             var range = intent.ComparisonRanges[index];
             var whereClauses = new List<string>();
-            var labelParameter = $"$p{parameterIndex++}";
-            var sortParameter = $"$p{parameterIndex++}";
-            var fromParameter = $"$p{parameterIndex++}";
-            var toParameter = $"$p{parameterIndex++}";
+            var labelParameter = dialect.ParameterName(parameterIndex++);
+            var sortParameter = dialect.ParameterName(parameterIndex++);
+            var fromParameter = dialect.ParameterName(parameterIndex++);
+            var toParameter = dialect.ParameterName(parameterIndex++);
 
             parameters[labelParameter] = range.Label;
             parameters[sortParameter] = index;
-            parameters[fromParameter] = range.FromUtc.ToString("yyyy-MM-dd HH:mm:ss");
-            parameters[toParameter] = range.ToExclusiveUtc.ToString("yyyy-MM-dd HH:mm:ss");
+            parameters[fromParameter] = dialect.DateParameter(range.FromUtc);
+            parameters[toParameter] = dialect.DateParameter(range.ToExclusiveUtc);
 
             whereClauses.Add($"{range.DateColumn} >= {fromParameter} AND {range.DateColumn} < {toParameter}");
-            AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex);
+            AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex, dialect);
 
             innerSelects.Add(
-                $"SELECT {sortParameter} AS __sort, {labelParameter} AS period, {BuildMetricExpression(intent.Metric)} AS \"{intent.Metric.Key}\" " +
+                $"SELECT {sortParameter} AS __sort, {labelParameter} AS period, {BuildMetricExpression(intent.Metric, dialect)} AS \"{intent.Metric.Key}\" " +
                 $"FROM {intent.Source.Table} WHERE {string.Join(" AND ", whereClauses)}");
         }
 
@@ -119,12 +131,12 @@ public class SqlBuilder
         return new BuiltSql(sql, parameters, BuildSignature(sql, parameters));
     }
 
-    private static string BuildMetricExpression(MetricDefinition metric) => metric.Aggregation switch
+    private static string BuildMetricExpression(MetricDefinition metric, SqlBuildDialect dialect) => metric.Aggregation switch
     {
         "count" => $"COUNT({metric.Expression})",
-        "sum" => $"ROUND(SUM({metric.Expression}), 2)",
-        "avg" => $"ROUND(AVG({metric.Expression}), 2)",
-        "max" => $"ROUND(MAX({metric.Expression}), 2)",
+        "sum" => dialect.Round($"SUM({metric.Expression})"),
+        "avg" => dialect.Round($"AVG({metric.Expression})"),
+        "max" => dialect.Round($"MAX({metric.Expression})"),
         "formula" => metric.Expression,
         _ => throw new InvalidOperationException($"Unsupported aggregation: {metric.Aggregation}")
     };
@@ -133,7 +145,8 @@ public class SqlBuilder
         IReadOnlyList<ValidatedFilter> filters,
         ICollection<string> whereClauses,
         IDictionary<string, object?> parameters,
-        ref int parameterIndex)
+        ref int parameterIndex,
+        SqlBuildDialect dialect)
     {
         foreach (var filter in filters)
         {
@@ -142,7 +155,7 @@ public class SqlBuilder
                 var parameterNames = new List<string>();
                 foreach (var value in filter.Values)
                 {
-                    var parameterName = $"$p{parameterIndex++}";
+                    var parameterName = dialect.ParameterName(parameterIndex++);
                     parameterNames.Add(parameterName);
                     parameters[parameterName] = value;
                 }
@@ -151,7 +164,7 @@ public class SqlBuilder
                 continue;
             }
 
-            var singleParameter = $"$p{parameterIndex++}";
+            var singleParameter = dialect.ParameterName(parameterIndex++);
             parameters[singleParameter] = filter.Values[0];
             whereClauses.Add($"{filter.Definition.Column} {ToSqlOperator(filter.Operator)} {singleParameter}");
         }
@@ -191,4 +204,25 @@ public class SqlBuilder
 
         return $"{normalizedSql}|{normalizedParameters}";
     }
+}
+
+internal sealed record SqlBuildDialect(string Provider)
+{
+    public static SqlBuildDialect For(string? provider) =>
+        new(string.IsNullOrWhiteSpace(provider) ? DataSourceProviders.Sqlite : provider.Trim().ToLowerInvariant());
+
+    public string ParameterName(int index) =>
+        string.Equals(Provider, DataSourceProviders.PostgreSql, StringComparison.OrdinalIgnoreCase)
+            ? $"@p{index}"
+            : $"$p{index}";
+
+    public object DateParameter(DateTime value) =>
+        string.Equals(Provider, DataSourceProviders.PostgreSql, StringComparison.OrdinalIgnoreCase)
+            ? DateTime.SpecifyKind(value, DateTimeKind.Unspecified)
+            : value.ToString("yyyy-MM-dd HH:mm:ss");
+
+    public string Round(string expression) =>
+        string.Equals(Provider, DataSourceProviders.PostgreSql, StringComparison.OrdinalIgnoreCase)
+            ? $"ROUND(({expression})::numeric, 2)"
+            : $"ROUND({expression}, 2)";
 }
