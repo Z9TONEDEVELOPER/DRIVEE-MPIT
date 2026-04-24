@@ -267,32 +267,47 @@
         WorkspaceState.ThinkingLabel = _thinkingLabel;
         WorkspaceState.NotifyChanged();
 
-        var history = BuildHistory();
-        var prevIntent = _messages
-            .Where(m => m.Role == "result" && m.Result?.Intent?.Kind == "query")
-            .Select(m => m.Result!.Intent)
-            .LastOrDefault();
-
-        var pr = await Engine.RunAsync(q, history, prevIntent);
-        pr.UserQuery = q;
-
-        var msg = new WorkspaceChatMessage();
-        if (pr.IsChat)
+        try
         {
-            msg.Role = "chat";
-            msg.Text = pr.ChatReply;
+            var history = BuildHistory();
+            var prevIntent = _messages
+                .Where(m => m.Role == "result" && m.Result?.Intent?.Kind == "query")
+                .Select(m => m.Result!.Intent)
+                .LastOrDefault();
+
+            var pr = await Engine.RunAsync(q, history, prevIntent);
+            pr.UserQuery = q;
+
+            var msg = new WorkspaceChatMessage();
+            if (pr.IsChat)
+            {
+                msg.Role = "chat";
+                msg.Text = pr.ChatReply;
+            }
+            else
+            {
+                msg.Role = "result";
+                msg.Result = pr;
+                msg.Visualization = pr.Visualization;
+                msg.ReportName = BuildReportName(pr);
+            }
+            _messages.Add(msg);
         }
-        else
+        catch (Exception exception)
         {
-            msg.Role = "result";
-            msg.Result = pr;
-            msg.Visualization = pr.Visualization;
-            msg.ReportName = BuildReportName(pr);
+            _messages.Add(new WorkspaceChatMessage
+            {
+                Role = "chat",
+                Text = $"Не удалось выполнить запрос: {exception.Message}"
+            });
         }
-        _messages.Add(msg);
-        _busy = false;
-        WorkspaceState.ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
-        WorkspaceState.NotifyChanged();
+        finally
+        {
+            _busy = false;
+            WorkspaceState.ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
+            _thinkingLabel = WorkspaceState.ThinkingLabel;
+            WorkspaceState.NotifyChanged();
+        }
     }
 
     private void UseTemplate(string t) => _query = t;

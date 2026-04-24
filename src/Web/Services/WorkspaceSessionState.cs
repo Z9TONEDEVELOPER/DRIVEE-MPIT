@@ -15,6 +15,7 @@ public class WorkspaceSessionState
     {
         Messages.Clear();
         Query = "";
+        Busy = false;
         ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
         NotifyChanged();
     }
