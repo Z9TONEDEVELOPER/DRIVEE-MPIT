@@ -1,8 +1,9 @@
 @page "/reports"
 @attribute [Authorize]
 @rendermode InteractiveServer
+@using global::DriveeDataSpace.Core.Models
 @using global::DriveeDataSpace.Web.Models
-@inject global::DriveeDataSpace.Web.Services.ReportService ReportsSvc
+@inject global::DriveeDataSpace.Core.Services.ReportService ReportsSvc
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthenticationStateProvider
 

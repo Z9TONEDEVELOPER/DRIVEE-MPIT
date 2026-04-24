@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Hosting;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 internal static class DataPathResolver
 {

@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public class QueryExecutor
 {

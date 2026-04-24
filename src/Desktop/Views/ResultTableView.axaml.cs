@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using DriveeDataSpace.Core.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
 
 namespace DriveeDataSpace.Desktop.Views;

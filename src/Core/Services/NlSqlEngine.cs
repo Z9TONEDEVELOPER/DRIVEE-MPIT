@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public class NlSqlEngine
 {

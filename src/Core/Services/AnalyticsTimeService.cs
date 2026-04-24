@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed record AnalyticsTimeContext(
     DateTime SystemTodayUtc,

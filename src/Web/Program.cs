@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using DriveeDataSpace.Web.Components;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
+using DriveeDataSpace.Core.Services;
 using DriveeDataSpace.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -108,14 +109,18 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
 }).DisableAntiforgery().AllowAnonymous();
 
 app.MapPost("/api/query", async (
-    QueryApiRequest request,
+    QueryRequest request,
     NlSqlEngine engine,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Text))
         return Results.BadRequest(new { error = "Query text is empty." });
 
-    var result = await engine.RunAsync(request.Text.Trim(), cancellationToken: cancellationToken);
+    var result = await engine.RunAsync(
+        request.Text.Trim(),
+        request.History,
+        request.PreviousIntent,
+        cancellationToken);
     result.UserQuery = request.Text.Trim();
     return Results.Ok(result);
 }).DisableAntiforgery().AllowAnonymous();
@@ -126,7 +131,7 @@ app.MapGet("/api/reports", (ReportService reports, HttpContext context) =>
     return Results.Ok(reports.ListForAuthor(userName));
 }).AllowAnonymous();
 
-app.MapPost("/api/reports", (SaveReportApiRequest request, ReportService reports, HttpContext context) =>
+app.MapPost("/api/reports", (SaveReportRequest request, ReportService reports, HttpContext context) =>
 {
     if (string.IsNullOrWhiteSpace(request.Name))
         return Results.BadRequest(new { error = "Report name is empty." });
@@ -194,12 +199,3 @@ static string GetApiUserName(HttpContext context) =>
 
 static bool IsApiAdmin(HttpContext context) =>
     context.User.Identity?.IsAuthenticated == true && context.User.IsInRole(AppRoles.Admin);
-
-public sealed record QueryApiRequest(string Text);
-
-public sealed record SaveReportApiRequest(
-    string Name,
-    string UserQuery,
-    string IntentJson,
-    string Sql,
-    string Visualization);

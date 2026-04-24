@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DriveeDataSpace.Web.Models;
+namespace DriveeDataSpace.Core.Models;
 
 public sealed class QueryIntent
 {

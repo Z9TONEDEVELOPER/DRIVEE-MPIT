@@ -3,13 +3,11 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Web.Services;
-
-public record ChatTurn(string Role, string Content);
+namespace DriveeDataSpace.Core.Services;
 
 public class LlmService
 {

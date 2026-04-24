@@ -1,7 +1,10 @@
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed class EmailService
 {

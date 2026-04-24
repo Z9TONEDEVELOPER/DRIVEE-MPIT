@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Configuration;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed record SqlGuardReport(
     bool Ok,

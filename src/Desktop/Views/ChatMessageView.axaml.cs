@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using DriveeDataSpace.Core.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
 
