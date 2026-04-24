@@ -147,7 +147,7 @@
                           @onkeydown="OnKeyDown"
                           placeholder="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
                           rows="1"></textarea>
-                <button class="bi-send" @onclick="Send" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))" title="Отправить">
+                <button class="bi-send" @onclick="Send" aria-disabled="@_busy" title="Отправить">
                     @if (_busy)
                     {
                         <span>…</span>

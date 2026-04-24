@@ -543,12 +543,7 @@ public class IntentValidator
             text.Contains("дорогих заказ", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("expensive orders", StringComparison.OrdinalIgnoreCase))
         {
-            canonicalIntent.Metric = "order_price";
-            canonicalIntent.Visualization = "table";
-            if (canonicalIntent.Dimensions.All(dimension => !dimension.Equals("order", StringComparison.OrdinalIgnoreCase)))
-                canonicalIntent.Dimensions.Add("order");
-            if (canonicalIntent.Sort.Count == 0)
-                canonicalIntent.Sort.Add(new QuerySort { Field = "metric", Direction = "desc" });
+            ForceOrderPriceList(canonicalIntent);
         }
 
         if (canonicalIntent.Sort.Count == 0)
@@ -612,16 +607,22 @@ public class IntentValidator
 
         if (LooksLikeOrderListWithPriceFilter(text, canonicalIntent.Filters))
         {
-            canonicalIntent.Metric = "order_price";
-            canonicalIntent.Visualization = "table";
-            if (canonicalIntent.Dimensions.All(dimension => !dimension.Equals("order", StringComparison.OrdinalIgnoreCase)))
-                canonicalIntent.Dimensions.Add("order");
-            if (canonicalIntent.Sort.Count == 0)
-                canonicalIntent.Sort.Add(new QuerySort { Field = "metric", Direction = "desc" });
+            ForceOrderPriceList(canonicalIntent);
         }
 
         if (text.Contains("pie", StringComparison.OrdinalIgnoreCase) || text.Contains("круг", StringComparison.OrdinalIgnoreCase))
             canonicalIntent.Visualization ??= "pie";
+    }
+
+    private static void ForceOrderPriceList(QueryIntent canonicalIntent)
+    {
+        canonicalIntent.Metric = "order_price";
+        canonicalIntent.Aggregation = "max";
+        canonicalIntent.Visualization = "table";
+        if (canonicalIntent.Dimensions.All(dimension => !dimension.Equals("order", StringComparison.OrdinalIgnoreCase)))
+            canonicalIntent.Dimensions.Add("order");
+        if (canonicalIntent.Sort.Count == 0)
+            canonicalIntent.Sort.Add(new QuerySort { Field = "metric", Direction = "desc" });
     }
 
     private static bool IsBareSalesQuery(string text)

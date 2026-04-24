@@ -510,6 +510,7 @@ h1:focus {
 }
 .bi-send:hover:not(:disabled) { background: #4338ca; transform: scale(1.05); }
 .bi-send:disabled { background: #cbd5e1; cursor: not-allowed; }
+.bi-send[aria-disabled="true"] { background: #cbd5e1; cursor: wait; transform: none; }
 .bi-chat-hint {
     text-align: center; font-size: 11px; color: #94a3b8;
     margin-top: 6px;
