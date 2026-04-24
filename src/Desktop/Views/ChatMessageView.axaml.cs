@@ -22,8 +22,11 @@ public partial class ChatMessageView : UserControl
             // Отрисовать начальный чарт
             if (msg.Result?.Result != null)
             {
-                ChartView.Render(msg.Result.Result, msg.Visualization);
                 TableView.SetData(msg.Result.Result);
+                ChartView.IsVisible = msg.Visualization != "table";
+                TableView.IsVisible = msg.Visualization == "table";
+                if (msg.Visualization != "table")
+                    ChartView.Render(msg.Result.Result, msg.Visualization);
             }
         }
     }

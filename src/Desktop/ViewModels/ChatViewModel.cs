@@ -29,7 +29,7 @@ public partial class ChatViewModel : ViewModelBase
         => OnPropertyChanged(nameof(IsEmpty));
 
     // ── Templates ────────────────────────────────────────────────────────────
-    public string[] Templates =
+    public IReadOnlyList<string> Templates { get; } = new[]
     {
         "Количество заказов по дням за последние 30 дней",
         "Выручка по месяцам",
@@ -178,7 +178,7 @@ public partial class ChatViewModel : ViewModelBase
     private static string SuggestName(PipelineResult pr)
     {
         if (pr.Intent == null) return pr.UserQuery;
-        var parts = new System.Collections.Generic.List<string> { pr.Intent.Metric };
+        var parts = new System.Collections.Generic.List<string> { pr.Intent.Metric ?? "report" };
         if (!string.IsNullOrEmpty(pr.Intent.GroupBy)) parts.Add($"× {pr.Intent.GroupBy}");
         if (!string.IsNullOrEmpty(pr.Intent.Period)) parts.Add(pr.Intent.Period!);
         return string.Join(" ", parts);

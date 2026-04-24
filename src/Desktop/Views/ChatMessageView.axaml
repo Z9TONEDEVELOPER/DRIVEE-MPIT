@@ -236,7 +236,8 @@
                                 IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNullConverter}}">
 
                         <!-- Viz switch tabs -->
-                        <StackPanel Orientation="Horizontal"
+                        <StackPanel x:Name="VizTabsPanel"
+                                    Orientation="Horizontal"
                                     Spacing="4"
                                     Margin="0,0,0,10"
                                     IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
@@ -252,34 +253,32 @@
                                                Margin="0,0,0,10"
                                                IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}"/>
 
-                        <!-- Table (inline details) -->
-                        <Expander Header="Показать таблицу"
-                                  Margin="0,6,0,0"
-                                  IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
-                            <views1:ResultTableView x:Name="TableView"/>
-                        </Expander>
+                        <views1:ResultTableView x:Name="TableView"
+                                                Margin="0,6,0,0"
+                                                IsVisible="False"/>
 
                         <!-- Save row -->
                         <Grid ColumnDefinitions="*,Auto,Auto"
                               Margin="0,14,0,0"
+                              Background="White"
                               IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
                             <TextBox Grid.Column="0"
                                      x:Name="ReportNameBox"
                                      Classes="report-name-input"
-                                     Watermark="Название отчёта"
+                                     PlaceholderText="Название отчёта"
                                      Text="{Binding ReportName}"
                                      IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
-                                     Margin="0,0,8,0"/>
+                                     Margin="0,0,10,0"/>
                             <Button Grid.Column="1"
                                     Classes="save"
-                                    Content="💾 Сохранить отчёт"
+                                    Content="Сохранить отчёт"
                                     IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
                                     Click="SaveReport_Click"/>
                             <TextBlock Grid.Column="2"
                                        Foreground="#047857"
                                        FontSize="12.5"
                                        VerticalAlignment="Center"
-                                       Text="{Binding SavedAs, StringFormat='✓ Сохранено как {0}'}"
+                                       Text="{Binding SavedAs, StringFormat='Сохранено как {0}'}"
                                        IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNotNullConverter}}"/>
                         </Grid>
                     </StackPanel>
