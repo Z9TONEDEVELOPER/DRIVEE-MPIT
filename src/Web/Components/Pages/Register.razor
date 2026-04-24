@@ -1,0 +1,118 @@
+@page "/register"
+@attribute [AllowAnonymous]
+@rendermode InteractiveServer
+@inject UserService Users
+
+<PageTitle>Drivee BI · Registration</PageTitle>
+
+<div class="auth-shell">
+    <div class="auth-card auth-card-wide">
+        <div class="auth-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="auth-title">Drivee BI</div>
+                <div class="auth-subtitle">Запрос доступа к рабочему пространству</div>
+            </div>
+        </div>
+
+        <h1>Запросить доступ</h1>
+        <p class="auth-copy">После отправки заявки администратор проверит её и примет решение. Ответ будет отправлен на указанную почту.</p>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="auth-error">@_error</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_success))
+        {
+            <div class="auth-success">@_success</div>
+            <div class="auth-actions">
+                <a class="auth-link" href="/login">Вернуться ко входу</a>
+            </div>
+        }
+        else
+        {
+            <form class="auth-form" @onsubmit="Submit" @onsubmit:preventDefault="true">
+                <label class="auth-label" for="display-name">Имя</label>
+                <input id="display-name" class="auth-input" autocomplete="name" @bind="_form.DisplayName" />
+
+                <label class="auth-label" for="email">Email</label>
+                <input id="email" class="auth-input" type="email" autocomplete="email" @bind="_form.Email" />
+
+                <label class="auth-label" for="password">Пароль</label>
+                <input id="password" class="auth-input" type="password" autocomplete="new-password" @bind="_form.Password" />
+
+                <label class="auth-label" for="confirm-password">Повторите пароль</label>
+                <input id="confirm-password" class="auth-input" type="password" autocomplete="new-password" @bind="_form.ConfirmPassword" />
+
+                <label class="auth-label" for="organization">Отдел или роль</label>
+                <input id="organization" class="auth-input" autocomplete="organization-title" @bind="_form.Organization" />
+
+                <label class="auth-label" for="comment">Комментарий</label>
+                <textarea id="comment" class="auth-input auth-textarea" rows="3" @bind="_form.Comment"></textarea>
+
+                <button type="submit" class="auth-submit" disabled="@_submitting">
+                    @(_submitting ? "Отправляю..." : "Отправить заявку")
+                </button>
+            </form>
+
+            <div class="auth-footnote">
+                Уже есть доступ? <a class="auth-link" href="/login">Войти</a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly RegisterForm _form = new();
+    private bool _submitting;
+    private string? _error;
+    private string? _success;
+
+    private async Task Submit()
+    {
+        if (_submitting)
+            return;
+
+        _error = null;
+        _success = null;
+
+        if (_form.Password != _form.ConfirmPassword)
+        {
+            _error = "Пароли не совпадают.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            await Task.Yield();
+            var request = Users.SubmitRegistrationRequest(new RegistrationRequestInput(
+                _form.DisplayName,
+                _form.Email,
+                _form.Password,
+                _form.Organization,
+                _form.Comment));
+
+            _success = $"Заявка #{request.Id} отправлена. Администратор рассмотрит её и отправит ответ на {request.Email}.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private sealed class RegisterForm
+    {
+        public string DisplayName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string ConfirmPassword { get; set; } = "";
+        public string Organization { get; set; } = "";
+        public string Comment { get; set; } = "";
+    }
+}

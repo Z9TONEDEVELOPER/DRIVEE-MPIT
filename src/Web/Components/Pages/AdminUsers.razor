@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = AppRoles.Admin)]
 @rendermode InteractiveServer
 @inject UserService Users
+@inject EmailService Email
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -42,12 +43,90 @@
         </header>
 
         <div class="bi-reports-body">
+            @if (!string.IsNullOrWhiteSpace(_notice))
+            {
+                <div class="admin-notice">@_notice</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="admin-error">@_error</div>
+            }
+
+            <section class="admin-section">
+                <div class="admin-section-head">
+                    <div>
+                        <h2>Заявки на доступ</h2>
+                        <div class="bi-tagline">Новые пользователи появятся в системе только после одобрения администратора.</div>
+                    </div>
+                    <span class="admin-count">@_pendingRequests.Count ожидают</span>
+                </div>
+
+                <div class="bi-card bi-card-table">
+                    @if (_pendingRequests.Count == 0)
+                    {
+                        <div class="bi-empty">Новых заявок нет.</div>
+                    }
+                    else
+                    {
+                        <table class="bi-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Заявитель</th>
+                                    <th>Отдел или роль</th>
+                                    <th>Комментарий</th>
+                                    <th>Создана</th>
+                                    <th>Решение</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var request in _pendingRequests)
+                                {
+                                    <tr>
+                                        <td>@request.Id</td>
+                                        <td>
+                                            <div class="admin-user-name">@request.DisplayName</div>
+                                            <div class="admin-user-sub">@request.Email</div>
+                                        </td>
+                                        <td>@DisplayText(request.Organization)</td>
+                                        <td class="admin-comment">@DisplayText(request.Comment)</td>
+                                        <td>@request.CreatedAt.ToLocalTime().ToString("g")</td>
+                                        <td class="admin-actions-cell">
+                                            <div class="admin-request-actions">
+                                                <button class="bi-btn" disabled="@_busy" @onclick="() => Approve(request.Id)">Одобрить</button>
+                                                <button class="bi-btn danger" disabled="@_busy" @onclick="() => Reject(request.Id)">Отклонить</button>
+                                            </div>
+                                            <input
+                                                class="admin-reject-reason"
+                                                placeholder="Причина отказа"
+                                                value="@GetRejectionReason(request.Id)"
+                                                @oninput="eventArgs => SetRejectionReason(request.Id, eventArgs.Value?.ToString() ?? string.Empty)" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <section class="admin-section">
+                <div class="admin-section-head">
+                    <div>
+                        <h2>Пользователи</h2>
+                        <div class="bi-tagline">Активные учётные записи, роли и активность внутри внутреннего BI-сервиса.</div>
+                    </div>
+                    <span class="admin-count">@_users.Count всего</span>
+                </div>
+
             <div class="bi-card bi-card-table">
                 <table class="bi-table">
                     <thead>
                         <tr>
                             <th>#</th>
                             <th>Пользователь</th>
+                            <th>Email</th>
                             <th>Роль</th>
                             <th>Отчётов</th>
                             <th>Последний вход</th>
@@ -64,6 +143,7 @@
                                     <div class="admin-user-name">@item.DisplayName</div>
                                     <div class="admin-user-sub">@item.Username</div>
                                 </td>
+                                <td>@(item.Email ?? "—")</td>
                                 <td><span class="admin-role @(item.Role == AppRoles.Admin ? "admin" : "user")">@item.Role</span></td>
                                 <td>@item.ReportCount</td>
                                 <td>@FormatDate(item.LastLoginAt)</td>
@@ -76,25 +156,120 @@
                     </tbody>
                 </table>
             </div>
+            </section>
         </div>
     </main>
 </div>
 
 @code {
     private List<AppUserSummary> _users = new();
+    private List<RegistrationRequest> _pendingRequests = new();
+    private readonly Dictionary<int, string> _rejectionReasons = new();
     private string _username = "";
     private string _displayName = "";
+    private int _adminUserId;
+    private bool _busy;
+    private string? _notice;
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
-        _users = Users.ListUsers();
+        Refresh();
 
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        _adminUserId = authState.User.GetUserId() ?? 0;
     }
 
     private void OpenUser(int id) => Navigation.NavigateTo($"/admin/users/{id}");
+
+    private async Task Approve(int requestId)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+
+        try
+        {
+            var result = Users.ApproveRegistrationRequest(requestId, _adminUserId);
+            _notice = $"Заявка #{requestId} одобрена.";
+            try
+            {
+                await Email.SendRegistrationApprovedAsync(result.Request);
+                _notice += " Локальное письмо записано в лог приложения.";
+            }
+            catch (Exception exception)
+            {
+                _notice += $" Решение сохранено, но письмо не отправлено: {exception.Message}";
+            }
+
+            Refresh();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Reject(int requestId)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+
+        try
+        {
+            var result = Users.RejectRegistrationRequest(requestId, _adminUserId, GetRejectionReason(requestId));
+            _notice = $"Заявка #{requestId} отклонена.";
+            try
+            {
+                await Email.SendRegistrationRejectedAsync(result.Request);
+                _notice += " Локальное письмо записано в лог приложения.";
+            }
+            catch (Exception exception)
+            {
+                _notice += $" Решение сохранено, но письмо не отправлено: {exception.Message}";
+            }
+
+            Refresh();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Refresh()
+    {
+        _users = Users.ListUsers();
+        _pendingRequests = Users.ListRegistrationRequests(RegistrationRequestStatuses.Pending);
+        foreach (var requestId in _rejectionReasons.Keys.Except(_pendingRequests.Select(request => request.Id)).ToList())
+            _rejectionReasons.Remove(requestId);
+    }
+
+    private string GetRejectionReason(int requestId) =>
+        _rejectionReasons.TryGetValue(requestId, out var reason) ? reason : "";
+
+    private void SetRejectionReason(int requestId, string value) =>
+        _rejectionReasons[requestId] = value;
+
+    private static string DisplayText(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
 
     private static string FormatDate(DateTime? value) =>
         value?.ToLocalTime().ToString("g") ?? "—";

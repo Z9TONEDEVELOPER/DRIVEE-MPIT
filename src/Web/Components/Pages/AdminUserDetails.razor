@@ -51,6 +51,7 @@
                     <div class="bi-card-title">Профиль</div>
                     <div class="admin-facts">
                         <div><strong>Логин:</strong> @_user.Username</div>
+                        <div><strong>Email:</strong> @(_user.Email ?? "—")</div>
                         <div><strong>Роль:</strong> @_user.Role</div>
                         <div><strong>Статус:</strong> @(_user.IsActive ? "Активен" : "Отключён")</div>
                         <div><strong>Создан:</strong> @_user.CreatedAt.ToLocalTime().ToString("g")</div>

@@ -25,7 +25,7 @@
         <form method="post" action="/auth/login" class="auth-form">
             <input type="hidden" name="returnUrl" value="@NormalizedReturnUrl" />
 
-            <label class="auth-label" for="username">Логин</label>
+            <label class="auth-label" for="username">Email или логин</label>
             <input id="username" name="username" class="auth-input" autocomplete="username" autofocus />
 
             <label class="auth-label" for="password">Пароль</label>
@@ -35,7 +35,7 @@
         </form>
 
         <div class="auth-footnote">
-            Если вы не знаете свои учётные данные, обратитесь к корпоративному администратору.
+            Нет учётной записи? <a class="auth-link" href="/register">Запросить доступ</a>
         </div>
     </div>
 </div>
