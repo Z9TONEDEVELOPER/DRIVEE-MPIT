@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using DriveeDataSpace.Web.Components;
+using DriveeDataSpace.Web.Models;
 using DriveeDataSpace.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -104,6 +105,68 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
     context.Response.Redirect("/login");
 }).DisableAntiforgery().AllowAnonymous();
 
+app.MapPost("/api/query", async (
+    QueryApiRequest request,
+    NlSqlEngine engine,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Text))
+        return Results.BadRequest(new { error = "Query text is empty." });
+
+    var result = await engine.RunAsync(request.Text.Trim(), cancellationToken: cancellationToken);
+    result.UserQuery = request.Text.Trim();
+    return Results.Ok(result);
+}).DisableAntiforgery().AllowAnonymous();
+
+app.MapGet("/api/reports", (ReportService reports, HttpContext context) =>
+{
+    var userName = GetApiUserName(context);
+    return Results.Ok(reports.ListForAuthor(userName));
+}).AllowAnonymous();
+
+app.MapPost("/api/reports", (SaveReportApiRequest request, ReportService reports, HttpContext context) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name))
+        return Results.BadRequest(new { error = "Report name is empty." });
+    if (string.IsNullOrWhiteSpace(request.IntentJson) || string.IsNullOrWhiteSpace(request.Sql))
+        return Results.BadRequest(new { error = "Report payload is incomplete." });
+
+    var report = new Report
+    {
+        Name = request.Name.Trim(),
+        UserQuery = request.UserQuery?.Trim() ?? string.Empty,
+        IntentJson = request.IntentJson,
+        Sql = request.Sql,
+        Visualization = string.IsNullOrWhiteSpace(request.Visualization) ? "table" : request.Visualization.Trim(),
+        Author = GetApiUserName(context),
+        CreatedAt = DateTime.UtcNow
+    };
+
+    report.Id = reports.Save(report);
+    return Results.Ok(report);
+}).DisableAntiforgery().AllowAnonymous();
+
+app.MapPost("/api/reports/{id:int}/rerun", (
+    int id,
+    NlSqlEngine engine,
+    ReportService reports,
+    HttpContext context) =>
+{
+    var report = reports.GetForAuthor(id, GetApiUserName(context), IsApiAdmin(context));
+    if (report == null)
+        return Results.NotFound(new { error = "Report not found." });
+
+    var result = engine.ReplayFromReport(report.IntentJson);
+    result.UserQuery = report.UserQuery;
+    return Results.Ok(result);
+}).DisableAntiforgery().AllowAnonymous();
+
+app.MapDelete("/api/reports/{id:int}", (int id, ReportService reports, HttpContext context) =>
+{
+    reports.DeleteForAuthor(id, GetApiUserName(context), IsApiAdmin(context));
+    return Results.NoContent();
+}).AllowAnonymous();
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -121,3 +184,20 @@ static string NormalizeReturnUrl(string? returnUrl)
         ? returnUrl
         : "/";
 }
+
+static string GetApiUserName(HttpContext context) =>
+    context.User.Identity?.IsAuthenticated == true
+        ? context.User.Identity.Name ?? "desktop"
+        : "desktop";
+
+static bool IsApiAdmin(HttpContext context) =>
+    context.User.Identity?.IsAuthenticated == true && context.User.IsInRole(AppRoles.Admin);
+
+public sealed record QueryApiRequest(string Text);
+
+public sealed record SaveReportApiRequest(
+    string Name,
+    string UserQuery,
+    string IntentJson,
+    string Sql,
+    string Visualization);

@@ -87,8 +87,7 @@
                                    FontSize="11"
                                    FontWeight="SemiBold"
                                    LetterSpacing="1"/>
-                        <ItemsControl ItemsSource="{Binding Chat}">
-                            <!-- ItemsSource="{Binding Chat.Templates}" -->
+                        <ItemsControl ItemsSource="{Binding Chat.Templates}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Button Content="{Binding}"
@@ -183,7 +182,7 @@
                                      x:Name="ChatInputBox"
                                      Classes="chat-input"
                                      Text="{Binding Chat.InputText}"
-                                     Watermark="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
+                                     PlaceholderText="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
                                      IsEnabled="{Binding !Chat.IsBusy}"
                                      KeyDown="ChatInput_KeyDown"
                                      MaxHeight="200"/>
@@ -273,8 +272,7 @@
                                    TextAlignment="Center"
                                    Margin="0,0,0,22"/>
                         <WrapPanel HorizontalAlignment="Center">
-                            <ItemsControl ItemsSource="{Binding Chat}">
-                                <!-- ItemsSource="{Binding Chat.Templates}" -->
+                            <ItemsControl ItemsSource="{Binding Chat.Templates}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <WrapPanel/>

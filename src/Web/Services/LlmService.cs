@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -17,6 +18,14 @@ public class LlmService
     private readonly string _endpoint;
     private readonly string _model;
     private readonly bool _usesSimpleChatApi;
+    private readonly string _fallbackProvider;
+    private readonly string _gigaChatAuthKey;
+    private readonly string _gigaChatScope;
+    private readonly string _gigaChatAuthUrl;
+    private readonly string _gigaChatBaseUrl;
+    private readonly string _gigaChatModel;
+    private string? _gigaChatAccessToken;
+    private DateTimeOffset _gigaChatTokenExpiresAt;
 
     public LlmService(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<LlmService> logger)
     {
@@ -25,6 +34,12 @@ public class LlmService
         _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
         _model = configuration["Llm:Model"] ?? "local-model";
         _usesSimpleChatApi = _endpoint.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase);
+        _fallbackProvider = configuration["Llm:Fallback:Provider"] ?? "";
+        _gigaChatAuthKey = configuration["Llm:Fallback:GigaChat:AuthorizationKey"] ?? "";
+        _gigaChatScope = configuration["Llm:Fallback:GigaChat:Scope"] ?? "GIGACHAT_API_PERS";
+        _gigaChatAuthUrl = configuration["Llm:Fallback:GigaChat:AuthUrl"] ?? "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
+        _gigaChatBaseUrl = (configuration["Llm:Fallback:GigaChat:BaseUrl"] ?? "https://gigachat.devices.sberbank.ru/api/v1").TrimEnd('/');
+        _gigaChatModel = configuration["Llm:Fallback:GigaChat:Model"] ?? "GigaChat";
         var timeoutSeconds = int.TryParse(configuration["Llm:TimeoutSeconds"], out var timeout) ? timeout : 60;
         _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
     }
@@ -60,9 +75,106 @@ public class LlmService
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            _logger.LogWarning(exception, "LLM interpretation failed. Falling back to heuristic parser.");
+            _logger.LogWarning(exception, "Primary LLM interpretation failed.");
+            var fallbackIntent = await TryFallbackInterpretAsync(userQuery, systemPrompt, history, cancellationToken);
+            if (fallbackIntent != null)
+                return fallbackIntent;
+
+            _logger.LogWarning("LLM fallback is unavailable. Falling back to heuristic parser.");
             return HeuristicFallback(userQuery);
         }
+    }
+
+    private async Task<QueryIntent?> TryFallbackInterpretAsync(
+        string userQuery,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn>? history,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(_fallbackProvider, "GigaChat", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(_gigaChatAuthKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
+            var messages = new List<object> { new { role = "system", content = systemPrompt } };
+            if (history != null)
+            {
+                foreach (var turn in history.TakeLast(8))
+                    messages.Add(new { role = turn.Role, content = turn.Content });
+            }
+
+            messages.Add(new { role = "user", content = userQuery });
+            var payload = new
+            {
+                model = _gigaChatModel,
+                messages,
+                temperature = 0.1
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"GigaChat HTTP {(int)response.StatusCode}: {responseBody}");
+
+            var content = ExtractContent(responseBody);
+            var json = ExtractJson(content);
+            return JsonSerializer.Deserialize<QueryIntent>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            _logger.LogWarning(exception, "GigaChat fallback interpretation failed.");
+            return null;
+        }
+    }
+
+    private async Task<string> GetGigaChatAccessTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_gigaChatAccessToken) &&
+            _gigaChatTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
+        {
+            return _gigaChatAccessToken;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, _gigaChatAuthUrl)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["scope"] = _gigaChatScope
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", _gigaChatAuthKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add("RqUID", Guid.NewGuid().ToString());
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"GigaChat OAuth HTTP {(int)response.StatusCode}: {body}");
+
+        using var document = JsonDocument.Parse(body);
+        _gigaChatAccessToken = document.RootElement.GetProperty("access_token").GetString()
+            ?? throw new InvalidOperationException("GigaChat OAuth response does not contain access_token.");
+
+        var expiresAt = document.RootElement.TryGetProperty("expires_at", out var expiresAtElement) && expiresAtElement.TryGetInt64(out var unix)
+            ? DateTimeOffset.FromUnixTimeSeconds(unix)
+            : DateTimeOffset.UtcNow.AddMinutes(25);
+        _gigaChatTokenExpiresAt = expiresAt;
+
+        return _gigaChatAccessToken;
     }
 
     private static string ExtractContent(string responseBody)
