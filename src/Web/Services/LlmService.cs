@@ -577,6 +577,7 @@ public static class PromptTemplates
 - Для временного ряда используй visualization = line.
 - Для top N обычно нужен limit и sort по metric desc.
 - Для compare_periods можно заполнить periods или comparison.periods.
+- Если пользователь пишет «последняя неделя», «последний месяц» или «последний год» без уточнения, это неоднозначно: верни kind=""clarify"" и спроси, нужен прошлый календарный период или последние N дней/месяцев.
 - Если не уверен — лучше верни kind=""clarify"", чем рискованный query intent.";
     }
 }

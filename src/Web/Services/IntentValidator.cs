@@ -232,6 +232,12 @@ public class IntentValidator
             aggregation = metricDefinition.Aggregation;
         }
 
+        if (allowClarification &&
+            _dateResolver.TryBuildAmbiguousPeriodClarification(userQuery, out clarificationMessage))
+        {
+            return false;
+        }
+
         var dateRangeSpec = canonicalIntent.DateRange ?? _dateResolver.NormalizeLegacy(canonicalIntent.Period, metricDefinition.DateColumn);
         if (dateRangeSpec == null && !string.IsNullOrWhiteSpace(userQuery) &&
             _dateResolver.TryExtractDateRange(userQuery, metricDefinition.DateColumn, out var inferredDateRange))

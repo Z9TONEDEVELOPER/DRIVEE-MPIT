@@ -145,6 +145,41 @@ public class DateResolver
             .ToList();
     }
 
+    public bool TryBuildAmbiguousPeriodClarification(string userQuery, out string? clarification)
+    {
+        clarification = null;
+        if (string.IsNullOrWhiteSpace(userQuery))
+            return false;
+
+        var text = userQuery.Trim().ToLowerInvariant();
+
+        if (AmbiguousWeekPeriodPattern.IsMatch(text))
+        {
+            clarification = "Уточните период: вы имеете в виду прошлую календарную неделю или последние 7 дней?";
+            return true;
+        }
+
+        if (AmbiguousMonthPeriodPattern.IsMatch(text))
+        {
+            clarification = "Уточните период: вы имеете в виду прошлый календарный месяц или последние 30 дней?";
+            return true;
+        }
+
+        if (AmbiguousYearPeriodPattern.IsMatch(text))
+        {
+            clarification = "Уточните период: вы имеете в виду прошлый календарный год или последние 12 месяцев?";
+            return true;
+        }
+
+        if (UnresolvedTemporalHintPattern.IsMatch(text) && !TryExtractDateRange(userQuery, SemanticLayer.DefaultDateColumn, out _))
+        {
+            clarification = "Уточните, за какой период нужно показать данные?";
+            return true;
+        }
+
+        return false;
+    }
+
     public bool TryExtractDateRange(string userQuery, string defaultDateColumn, out QueryDateRange? dateRange)
     {
         dateRange = null;
