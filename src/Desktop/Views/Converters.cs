@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
+using DriveeDataSpace.Core.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
 
 namespace DriveeDataSpace.Desktop.Views;
@@ -30,6 +31,12 @@ public static class Converters
 
     public static readonly IValueConverter IsZeroConverter =
         new FuncConverter<int, bool>(v => v == 0);
+
+    public static readonly IValueConverter IsNotZeroConverter =
+        new FuncConverter<int, bool>(v => v != 0);
+
+    public static readonly IValueConverter LocalDateTimeConverter =
+        new FuncConverter<DateTime, string>(v => v.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
 
     // ── QueryResult ───────────────────────────────────────────────────────
     public static readonly IValueConverter HasRowsConverter =

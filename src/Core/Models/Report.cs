@@ -1,4 +1,4 @@
-namespace DriveeDataSpace.Web.Models;
+namespace DriveeDataSpace.Core.Models;
 
 public class Report
 {

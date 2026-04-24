@@ -1,6 +1,6 @@
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed record ExplainResult(
     string Summary,

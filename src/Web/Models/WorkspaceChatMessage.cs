@@ -1,3 +1,5 @@
+using DriveeDataSpace.Core.Models;
+
 namespace DriveeDataSpace.Web.Models;
 
 public class WorkspaceChatMessage

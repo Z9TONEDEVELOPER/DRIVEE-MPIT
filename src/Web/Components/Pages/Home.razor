@@ -2,7 +2,9 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @using System.Text.Json
+@using global::DriveeDataSpace.Core.Models
 @using global::DriveeDataSpace.Web.Models
+@using global::DriveeDataSpace.Core.Services
 @using global::DriveeDataSpace.Web.Services
 @inject NlSqlEngine Engine
 @inject ReportService Reports
@@ -180,7 +182,7 @@
     }
     private string _thinkingLabel = "Думаю…";
     private List<WorkspaceChatMessage> _messages => WorkspaceState.Messages;
-    private List<global::DriveeDataSpace.Web.Models.Report> _reports = new();
+    private List<global::DriveeDataSpace.Core.Models.Report> _reports = new();
     private string _username = "";
     private string _displayName = "";
     private bool _isAdmin;
@@ -240,7 +242,7 @@
 
     private void RefreshReports() =>
         _reports = string.IsNullOrWhiteSpace(_username)
-            ? new List<global::DriveeDataSpace.Web.Models.Report>()
+            ? new List<global::DriveeDataSpace.Core.Models.Report>()
             : Reports.ListForAuthor(_username);
 
     private async Task OnKeyDown(KeyboardEventArgs e)

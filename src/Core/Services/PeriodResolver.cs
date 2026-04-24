@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public record PeriodRange(DateTime From, DateTime To, string Label);
 

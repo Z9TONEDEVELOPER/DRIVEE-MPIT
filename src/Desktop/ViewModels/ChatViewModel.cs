@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DriveeDataSpace.Core.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
 using DriveeDataSpace.DriveeDataSpace.Desktop.Services;
 
@@ -51,7 +53,14 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public async Task UseTemplateAsync(string template)
+    public void UseTemplate(string template)
+    {
+        if (IsBusy) return;
+        InputText = template;
+    }
+
+    [RelayCommand]
+    public async Task RunTemplateAsync(string template)
     {
         if (IsBusy) return;
         await RunQueryAsync(template);
@@ -84,7 +93,11 @@ public partial class ChatViewModel : ViewModelBase
             Messages.Add(new ChatMessage { Role = ChatRole.Bot, Text = "Не удалось открыть отчёт: " + ex.Message });
             OnPropertyChanged(nameof(IsEmpty));
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            ThinkingLabel = "Думаю…";
+        }
     }
 
     [RelayCommand]
@@ -134,7 +147,13 @@ public partial class ChatViewModel : ViewModelBase
 
         try
         {
-            var pr = await _api.RunQueryAsync(q);
+            var history = BuildHistory();
+            var previousIntent = Messages
+                .Where(message => message.Role == ChatRole.Result && message.Result?.Intent?.Kind == QueryIntentKinds.Query)
+                .Select(message => message.Result!.Intent)
+                .LastOrDefault();
+
+            var pr = await _api.RunQueryAsync(q, history, previousIntent);
             pr.UserQuery = q;
 
             if (pr.IsChat)
@@ -148,7 +167,11 @@ public partial class ChatViewModel : ViewModelBase
             Messages.Add(new ChatMessage { Role = ChatRole.Bot, Text = $"Ошибка: {ex.Message}" });
             OnPropertyChanged(nameof(IsEmpty));
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            ThinkingLabel = "Думаю…";
+        }
     }
 
     private void AddResultMessage(PipelineResult pr, string name, string? savedAs = null)
@@ -173,6 +196,25 @@ public partial class ChatViewModel : ViewModelBase
             Reports = new ObservableCollection<Report>(list);
         }
         catch { /* ignore on load */ }
+    }
+
+    private List<ChatTurn> BuildHistory()
+    {
+        var turns = new List<ChatTurn>();
+        foreach (var message in Messages.TakeLast(8))
+        {
+            if (message.Role == ChatRole.User && !string.IsNullOrWhiteSpace(message.Text))
+                turns.Add(new ChatTurn("user", message.Text));
+            else if (message.Role == ChatRole.Bot && !string.IsNullOrWhiteSpace(message.Text))
+                turns.Add(new ChatTurn("assistant", message.Text));
+            else if (message.Role == ChatRole.Result && message.Result?.Intent != null)
+                turns.Add(new ChatTurn("assistant", JsonSerializer.Serialize(message.Result.Intent)));
+        }
+
+        if (turns.Count > 0 && turns[^1].Role == "user")
+            turns.RemoveAt(turns.Count - 1);
+
+        return turns;
     }
 
     private static string SuggestName(PipelineResult pr)

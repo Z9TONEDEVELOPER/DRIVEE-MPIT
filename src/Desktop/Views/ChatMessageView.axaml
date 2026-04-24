@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="using:DriveeDataSpace.DriveeDataSpace.Desktop"
              xmlns:models="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop.Models"
+             xmlns:coreModels="clr-namespace:DriveeDataSpace.Core.Models;assembly=DriveeDataSpace.Core"
              xmlns:views1="clr-namespace:DriveeDataSpace.Desktop.Views"
              x:Class="DriveeDataSpace.Desktop.Views.ChatMessageView"
              x:DataType="models:ChatMessage">
@@ -41,11 +42,7 @@
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"/>
             </Border>
-            <Border Background="White"
-                    BorderBrush="#e5e7eb"
-                    BorderThickness="1"
-                    CornerRadius="4,14,14,14"
-                    Padding="14,10"
+            <Border Classes="bot-bubble"
                     MaxWidth="640">
                 <TextBlock Text="{Binding Text}"
                            Foreground="#1f2937"
@@ -71,10 +68,7 @@
             </Border>
 
             <!-- Result card -->
-            <Border Background="White"
-                    BorderBrush="#e5e7eb"
-                    BorderThickness="1"
-                    CornerRadius="4,14,14,14"
+            <Border Classes="result-bubble"
                     MaxWidth="820"
                     MinWidth="400">
                 <StackPanel>
@@ -93,7 +87,7 @@
                     </Border>
 
                     <!-- ── Explain + meta ────────────────────────── -->
-                    <StackPanel Margin="16,14,16,10"
+                    <StackPanel Classes="result-card explain-card"
                                 IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNullConverter}}">
                         <TextBlock Text="{Binding Result.Explain}"
                                    FontSize="14"
@@ -166,7 +160,7 @@
                                            Margin="0,0,0,10"/>
                                 <ItemsControl ItemsSource="{Binding Result.ReasoningTrail}">
                                     <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="models:ReasoningStep">
+                                        <DataTemplate x:DataType="coreModels:ReasoningStep">
                                             <StackPanel Margin="0,0,0,10"
                                                         IsVisible="{Binding Code, Converter={x:Static views1:Converters.IsNullConverter}}">
                                                 <TextBlock Text="{Binding Title}"
@@ -232,7 +226,7 @@
                     </StackPanel>
 
                     <!-- ── Viz + Table (only when has data) ────── -->
-                    <StackPanel Margin="16,0,16,14"
+                    <StackPanel Classes="result-card viz-card"
                                 IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNullConverter}}">
 
                         <!-- Viz switch tabs -->
@@ -259,8 +253,7 @@
 
                         <!-- Save row -->
                         <Grid ColumnDefinitions="*,Auto,Auto"
-                              Margin="0,14,0,0"
-                              Background="White"
+                              Classes="save-row"
                               IsVisible="{Binding Result.Result, Converter={x:Static views1:Converters.HasRowsConverter}}">
                             <TextBox Grid.Column="0"
                                      x:Name="ReportNameBox"

@@ -21,6 +21,29 @@
             <Setter Property="FontFamily" Value="Segoe UI, Arial, sans-serif"/>
         </Style>
 
+        <Style Selector="Border.bi-logo">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="34"/>
+        </Style>
+
+        <Style Selector="Border.user-card">
+            <Setter Property="Background" Value="#111827"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+
+        <Style Selector="Border.avatar">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+        </Style>
+
         <!-- ── Кнопка сброса стиля ─────────────────────────────── -->
         <Style Selector="Button.flat">
             <Setter Property="Background" Value="Transparent"/>
@@ -44,6 +67,31 @@
         </Style>
         <Style Selector="Button.primary:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="#cbd5e1"/>
+        </Style>
+
+        <Style Selector="Button.new-chat">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.new-chat:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4338ca"/>
+        </Style>
+
+        <Style Selector="Button.logout-btn">
+            <Setter Property="Background" Value="#111827"/>
+            <Setter Property="Foreground" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="8,10"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
         </Style>
 
         <!-- ── Ghost-кнопка ────────────────────────────────────── -->
@@ -126,6 +174,7 @@
         </Style>
         <Style Selector="Button.nav-link.active /template/ ContentPresenter">
             <Setter Property="Background" Value="#2d3a57"/>
+            <Setter Property="TextElement.Foreground" Value="White"/>
         </Style>
 
         <!-- ── Кнопка отчёта в сайдбаре ──────────────────────── -->
@@ -139,6 +188,21 @@
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.report-link:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#334155"/>
+        </Style>
+
+        <Style Selector="Button.report-delete">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#64748b"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.report-delete:pointerover /template/ ContentPresenter">
+            <Setter Property="TextElement.Foreground" Value="#ef4444"/>
         </Style>
 
         <!-- ── Таб визуализации ───────────────────────────────── -->
@@ -174,6 +238,43 @@
             <Setter Property="TextElement.Foreground" Value="White"/>
         </Style>
 
+        <Style Selector="Button.welcome-example">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="20"/>
+            <Setter Property="Padding" Value="8,14"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.welcome-example:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#eef2ff"/>
+            <Setter Property="BorderBrush" Value="#4f46e5"/>
+            <Setter Property="TextElement.Foreground" Value="#4f46e5"/>
+        </Style>
+
+        <Style Selector="Button.table-action">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#4f46e5"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Padding" Value="5,12"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.table-action.ghost">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#cbd5e1"/>
+        </Style>
+        <Style Selector="Button.table-action.ghost:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#eef2ff"/>
+            <Setter Property="BorderBrush" Value="#a5b4fc"/>
+            <Setter Property="TextElement.Foreground" Value="#3730a3"/>
+        </Style>
+
         <!-- ── TextBox стили ──────────────────────────────────── -->
         <Style Selector="TextBox.chat-input">
             <Setter Property="Background" Value="Transparent"/>
@@ -194,6 +295,145 @@
             <Setter Property="CornerRadius" Value="6"/>
             <Setter Property="Padding" Value="8,6"/>
             <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style Selector="Border.chat-header">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="28,16"/>
+        </Style>
+
+        <Style Selector="Border.chat-input-area">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            <Setter Property="Padding" Value="28,14,28,10"/>
+        </Style>
+
+        <Style Selector="Border.chat-input-wrap">
+            <Setter Property="Background" Value="#f7f8fb"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="14,6,6,6"/>
+            <Setter Property="MaxWidth" Value="960"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        </Style>
+
+        <Style Selector="StackPanel.chat-welcome">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="MaxWidth" Value="720"/>
+            <Setter Property="Margin" Value="0,40"/>
+        </Style>
+
+        <Style Selector="Border.welcome-icon">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Width" Value="60"/>
+            <Setter Property="Height" Value="60"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,0,18"/>
+        </Style>
+
+        <Style Selector="Grid.message-row">
+            <Setter Property="MaxWidth" Value="960"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="28,0"/>
+        </Style>
+
+        <Style Selector="Border.bot-bubble">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4,14,14,14"/>
+            <Setter Property="Padding" Value="14,10"/>
+        </Style>
+
+        <Style Selector="Border.result-bubble">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4,14,14,14"/>
+        </Style>
+
+        <Style Selector="StackPanel.result-card">
+            <Setter Property="Margin" Value="16,14,16,0"/>
+        </Style>
+
+        <Style Selector="StackPanel.viz-card">
+            <Setter Property="Margin" Value="16,14,16,14"/>
+        </Style>
+
+        <Style Selector="Grid.save-row">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Margin" Value="0,14,0,0"/>
+        </Style>
+
+        <Style Selector="Border.thinking-bubble">
+            <Setter Property="MinHeight" Value="36"/>
+        </Style>
+
+        <Style Selector="Border.typing-dot">
+            <Setter Property="Background" Value="#4f46e5"/>
+            <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+        </Style>
+
+        <Style Selector="Border.empty-card">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#cbd5e1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="30"/>
+        </Style>
+
+        <Style Selector="Border.reports-card">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+        </Style>
+
+        <Style Selector="Border.login-card">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="24"/>
+            <Setter Property="Padding" Value="28"/>
+            <Setter Property="BoxShadow" Value="0 24 60 0 #1f0f172a"/>
+        </Style>
+
+        <Style Selector="TextBox.login-input">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#d1d5db"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,12"/>
+            <Setter Property="FontSize" Value="14"/>
+        </Style>
+
+        <Style Selector="DataGrid">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="RowHeight" Value="42"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#f1f5f9"/>
+        </Style>
+
+        <Style Selector="DataGridColumnHeader">
+            <Setter Property="Background" Value="#f8fafc"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,8"/>
+        </Style>
+
+        <Style Selector="DataGridCell">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
         </Style>
 
         <!-- ── ScrollViewer ──────────────────────────────────── -->

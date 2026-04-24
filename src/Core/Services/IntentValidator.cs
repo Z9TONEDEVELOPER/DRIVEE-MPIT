@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed record ValidationResult(
     QueryIntent NormalizedIntent,

@@ -20,10 +20,10 @@ public partial class App : Application
 
         services.AddHttpClient<BiApiClient>(client =>
         {
-            // URL Web-бэкенда. В prod можно брать из конфига/env.
+            // URL инфраструктурного API. Web может работать отдельно как Blazor UI.
             client.BaseAddress = new Uri(
                 Environment.GetEnvironmentVariable("DRIVEE_API_URL")
-                ?? "http://localhost:5012");
+                ?? "http://localhost:5099");
             client.Timeout = TimeSpan.FromSeconds(120);
         });
 

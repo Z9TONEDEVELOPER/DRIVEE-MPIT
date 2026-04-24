@@ -1,3 +1,4 @@
+@using global::DriveeDataSpace.Core.Models
 @using global::DriveeDataSpace.Web.Models
 @using Microsoft.AspNetCore.Components
 @using Microsoft.JSInterop
@@ -20,7 +21,7 @@
 </div>
 
 @code {
-    [Parameter] public global::DriveeDataSpace.Web.Models.QueryResult? Result { get; set; }
+    [Parameter] public global::DriveeDataSpace.Core.Models.QueryResult? Result { get; set; }
     [Parameter] public string Type { get; set; } = "bar";
     [Parameter] public string Title { get; set; } = "";
 

@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Web.Models;
+using DriveeDataSpace.Core.Models;
 
-namespace DriveeDataSpace.Web.Services;
+namespace DriveeDataSpace.Core.Services;
 
 public sealed record ResolvedDateRange(
     DateTime FromUtc,
