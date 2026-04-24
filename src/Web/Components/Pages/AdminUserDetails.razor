@@ -1,0 +1,119 @@
+@page "/admin/users/{Id:int}"
+@attribute [Authorize(Roles = AppRoles.Admin)]
+@rendermode InteractiveServer
+@inject UserService Users
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Drivee BI · User</PageTitle>
+
+<div class="bi-workspace">
+    <aside class="bi-sidebar">
+        <div class="bi-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-sub">NL → SQL аналитика</div>
+            </div>
+        </div>
+
+        <div class="bi-user-card">
+            <div class="bi-user-label">Сеанс</div>
+            <div class="bi-user-name">@_adminDisplayName</div>
+            <div class="bi-user-meta">@_adminUsername · Администратор</div>
+            <form method="post" action="/auth/logout">
+                <button type="submit" class="bi-logout-btn">Выйти</button>
+            </form>
+        </div>
+
+        <nav class="bi-nav">
+            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
+            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
+            <a class="bi-nav-link active" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
+        </nav>
+    </aside>
+
+    <main class="bi-chat-main">
+        <header class="bi-chat-header">
+            <div>
+                <h1>@(_user?.DisplayName ?? "Пользователь не найден")</h1>
+                <div class="bi-tagline">Карточка пользователя, роль, активность и последние сохранённые отчёты.</div>
+            </div>
+        </header>
+
+        @if (_user == null)
+        {
+            <div class="bi-empty">Пользователь с id = @Id не найден.</div>
+        }
+        else
+        {
+            <div class="admin-grid">
+                <section class="bi-card">
+                    <div class="bi-card-title">Профиль</div>
+                    <div class="admin-facts">
+                        <div><strong>Логин:</strong> @_user.Username</div>
+                        <div><strong>Роль:</strong> @_user.Role</div>
+                        <div><strong>Статус:</strong> @(_user.IsActive ? "Активен" : "Отключён")</div>
+                        <div><strong>Создан:</strong> @_user.CreatedAt.ToLocalTime().ToString("g")</div>
+                        <div><strong>Последний вход:</strong> @FormatDate(_user.LastLoginAt)</div>
+                        <div><strong>Сохранённых отчётов:</strong> @_user.ReportCount</div>
+                    </div>
+                </section>
+
+                <section class="bi-card bi-card-table">
+                    <div class="bi-card-title">Последние отчёты</div>
+                    @if (_user.RecentReports.Count == 0)
+                    {
+                        <div class="bi-muted">Пользователь пока не сохранял отчёты.</div>
+                    }
+                    else
+                    {
+                        <table class="bi-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Название</th>
+                                    <th>Запрос</th>
+                                    <th>Визуализация</th>
+                                    <th>Создан</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var report in _user.RecentReports)
+                                {
+                                    <tr>
+                                        <td>@report.Id</td>
+                                        <td>@report.Name</td>
+                                        <td class="bi-muted">@report.UserQuery</td>
+                                        <td>@report.Visualization</td>
+                                        <td>@report.CreatedAt.ToLocalTime().ToString("g")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </section>
+            </div>
+        }
+    </main>
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private AppUserDetail? _user;
+    private string _adminUsername = "";
+    private string _adminDisplayName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = Users.GetUserDetail(Id);
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _adminUsername = authState.User.GetUsername();
+        _adminDisplayName = authState.User.GetDisplayName();
+    }
+
+    private static string FormatDate(DateTime? value) =>
+        value?.ToLocalTime().ToString("g") ?? "—";
+}

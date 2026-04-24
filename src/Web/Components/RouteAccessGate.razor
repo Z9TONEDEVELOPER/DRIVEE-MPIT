@@ -1,0 +1,35 @@
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+@if (_isAuthenticated)
+{
+    <div class="auth-access-denied">
+        <div class="auth-access-card">
+            <h1>Доступ ограничен</h1>
+            <p>У вас нет прав для просмотра этой страницы.</p>
+            <a class="auth-link" href="/">Вернуться в рабочее пространство</a>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isAuthenticated;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _isAuthenticated = authState.User.Identity?.IsAuthenticated == true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _isAuthenticated)
+        {
+            return;
+        }
+
+        var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var returnUrl = string.IsNullOrWhiteSpace(relative) ? "/" : "/" + relative;
+        Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
+    }
+}

@@ -1,218 +1,193 @@
 using System.Text;
 using DriveeDataSpace.Web.Models;
-using Microsoft.Extensions.Configuration;
 
 namespace DriveeDataSpace.Web.Services;
 
-public record BuiltSql(
+public sealed record BuiltSql(
     string Sql,
     Dictionary<string, object?> Parameters,
-    string HumanExplain,
-    string TechExplain,
-    List<ReasoningStep> ReasoningTrail);
+    string Signature);
 
 public class SqlBuilder
 {
-    private readonly SemanticLayer _semantic;
-    private readonly int _maxRows;
-
-    public SqlBuilder(SemanticLayer semantic, IConfiguration cfg)
+    public BuiltSql Build(ValidatedIntent intent)
     {
-        _semantic = semantic;
-        _maxRows = int.TryParse(cfg["Data:MaxRows"], out var m) ? m : 10000;
+        return intent.ComparisonRanges.Count > 0
+            ? BuildComparisonQuery(intent)
+            : BuildMetricQuery(intent);
     }
 
-    public BuiltSql Build(QueryIntent intent, string? userQuery = null)
+    private static BuiltSql BuildMetricQuery(ValidatedIntent intent)
     {
-        var metric = _semantic.ResolveMetric(intent.Metric)
-                     ?? throw new InvalidOperationException($"Неизвестная метрика: {intent.Metric}");
+        var sqlBuilder = new StringBuilder();
+        var parameters = new Dictionary<string, object?>();
+        var whereClauses = new List<string>();
+        var parameterIndex = 0;
 
-        if (intent.Intent == "compare_periods" && intent.Periods != null && intent.Periods.Count >= 2)
-            return BuildCompare(metric, intent, userQuery);
+        sqlBuilder.Append("SELECT ");
 
-        return BuildAggregate(metric, intent, userQuery);
-    }
-
-    private BuiltSql BuildAggregate(MetricDef metric, QueryIntent intent, string? userQuery)
-    {
-        var dim = _semantic.ResolveDimension(intent.GroupBy);
-        var period = PeriodResolver.Resolve(intent.Period);
-        var pars = new Dictionary<string, object?>();
-        var trail = new List<ReasoningStep>();
-
-        if (!string.IsNullOrWhiteSpace(userQuery))
-            trail.Add(new ReasoningStep("📝", "Разбираю ваш запрос", $"«{userQuery}»"));
-
-        var filterText = string.IsNullOrEmpty(metric.Filter) ? "без фильтра" : $"где `{metric.Filter}`";
-        trail.Add(new ReasoningStep("🎯",
-            $"Метрика: «{metric.DisplayName}»",
-            $"Распознал как `{metric.Key}`. Считаю `{metric.Aggregation}({metric.Expression})` из таблицы `{metric.Table}` ({filterText})."));
-
-        if (period != null)
-            trail.Add(new ReasoningStep("📅",
-                $"Период: {period.Label}",
-                $"`{intent.Period}` → с {period.From:yyyy-MM-dd} по {period.To.AddSeconds(-1):yyyy-MM-dd} (границы: `order_timestamp >= '{period.From:yyyy-MM-dd HH:mm:ss}'` и `< '{period.To:yyyy-MM-dd HH:mm:ss}'`)."));
-        else if (!string.IsNullOrWhiteSpace(intent.Period))
-            trail.Add(new ReasoningStep("📅", "Период", $"Не удалось разрешить период `{intent.Period}` — считаю по всем данным."));
-        else
-            trail.Add(new ReasoningStep("📅", "Период", "Не указан — считаю по всем данным."));
-
-        if (dim != null)
-            trail.Add(new ReasoningStep("📊",
-                $"Группировка: «{dim.Key}»",
-                $"Разбиваю результат по `{dim.Sql}` (сортирую по этой же оси)."));
-
-        if (intent.Filters != null && intent.Filters.Count > 0)
-            trail.Add(new ReasoningStep("🔎",
-                "Фильтры",
-                string.Join(", ", intent.Filters.Select(kv => $"`{kv.Key}` = `{kv.Value}`"))));
-
-        if (period != null)
-            trail.Add(new ReasoningStep("",
-                "\u041a\u0430\u043b\u0435\u043d\u0434\u0430\u0440\u043d\u0430\u044f \u0438\u043d\u0442\u0435\u0440\u043f\u0440\u0435\u0442\u0430\u0446\u0438\u044f",
-                DescribePeriodResolution(intent.Period, period)));
-
-        var sb = new StringBuilder();
-        sb.Append("SELECT ");
-        if (dim != null)
-            sb.Append($"{dim.Sql} AS \"{dim.Key}\", ");
-        sb.Append($"{metric.Aggregation}({metric.Expression}) AS \"{metric.Key}\" ");
-        sb.Append($"FROM {metric.Table} ");
-
-        var where = new List<string>();
-        if (!string.IsNullOrEmpty(metric.Filter)) where.Add(metric.Filter);
-        if (period != null)
+        if (intent.Dimensions.Count > 0)
         {
-            where.Add("order_timestamp >= $from AND order_timestamp < $to");
-            pars["$from"] = period.From.ToString("yyyy-MM-dd HH:mm:ss");
-            pars["$to"] = period.To.ToString("yyyy-MM-dd HH:mm:ss");
+            sqlBuilder.Append(string.Join(
+                ", ",
+                intent.Dimensions.Select(dimension => $"{dimension.SqlExpression} AS \"{dimension.Alias}\"")));
+            sqlBuilder.Append(", ");
         }
-        ApplyFilters(intent.Filters, where, pars);
-        if (where.Count > 0) sb.Append("WHERE ").Append(string.Join(" AND ", where)).Append(' ');
 
-        if (dim != null)
-            sb.Append($"GROUP BY {dim.Sql} ORDER BY {dim.Sql} ");
-        sb.Append($"LIMIT {_maxRows}");
+        sqlBuilder.Append($"{BuildMetricExpression(intent.Metric)} AS \"{intent.Metric.Key}\" ");
+        sqlBuilder.Append($"FROM {intent.Source.Table} ");
 
-        trail.Add(new ReasoningStep("🧩",
-            "Шаблон: агрегация",
-            "Собираю параметризованный SELECT из шаблона aggregate. LIMIT применяется автоматически."));
+        if (intent.DateRange != null)
+        {
+            var fromParameter = $"$p{parameterIndex++}";
+            var toParameter = $"$p{parameterIndex++}";
+            whereClauses.Add($"{intent.DateRange.DateColumn} >= {fromParameter} AND {intent.DateRange.DateColumn} < {toParameter}");
+            parameters[fromParameter] = intent.DateRange.FromUtc.ToString("yyyy-MM-dd HH:mm:ss");
+            parameters[toParameter] = intent.DateRange.ToExclusiveUtc.ToString("yyyy-MM-dd HH:mm:ss");
+        }
 
-        var humanParts = new List<string> { $"Посчитана метрика «{metric.DisplayName}»" };
-        if (dim != null) humanParts.Add($"с группировкой по «{dim.Key}»");
-        if (period != null) humanParts.Add($"за период: {period.Label}");
-        ApplyFiltersHuman(intent.Filters, humanParts);
+        AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex);
 
-        var tech = $"Шаблон: aggregate | метрика={metric.Key} ({metric.Aggregation}({metric.Expression})) | " +
-                   $"group_by={dim?.Key ?? "-"} | period={intent.Period ?? "-"} | filters={FormatFilters(intent.Filters)}";
+        if (whereClauses.Count > 0)
+            sqlBuilder.Append("WHERE ").Append(string.Join(" AND ", whereClauses)).Append(' ');
 
-        return new BuiltSql(sb.ToString(), pars, string.Join(", ", humanParts) + ".", tech, trail);
+        if (intent.Dimensions.Count > 0)
+        {
+            sqlBuilder.Append("GROUP BY ");
+            sqlBuilder.Append(string.Join(", ", intent.Dimensions.Select(dimension => dimension.SqlExpression)));
+            sqlBuilder.Append(' ');
+        }
+
+        AppendOrderBy(sqlBuilder, intent.Sort);
+        sqlBuilder.Append($"LIMIT {intent.Limit}");
+
+        var sql = sqlBuilder.ToString();
+        return new BuiltSql(sql, parameters, BuildSignature(sql, parameters));
     }
 
-    private BuiltSql BuildCompare(MetricDef metric, QueryIntent intent, string? userQuery)
+    private static BuiltSql BuildComparisonQuery(ValidatedIntent intent)
     {
-        var pars = new Dictionary<string, object?>();
-        var selects = new List<string>();
-        var humanPeriods = new List<string>();
-        var trail = new List<ReasoningStep>();
+        var innerSelects = new List<string>();
+        var parameters = new Dictionary<string, object?>();
+        var parameterIndex = 0;
 
-        if (!string.IsNullOrWhiteSpace(userQuery))
-            trail.Add(new ReasoningStep("📝", "Разбираю ваш запрос", $"«{userQuery}»"));
-
-        var filterText = string.IsNullOrEmpty(metric.Filter) ? "без фильтра" : $"где `{metric.Filter}`";
-        trail.Add(new ReasoningStep("🎯",
-            $"Метрика: «{metric.DisplayName}»",
-            $"Распознал как `{metric.Key}`. Считаю `{metric.Aggregation}({metric.Expression})` из таблицы `{metric.Table}` ({filterText})."));
-
-        var periodLines = new List<string>();
-        var i = 0;
-        foreach (var pKey in intent.Periods!)
+        for (var index = 0; index < intent.ComparisonRanges.Count; index++)
         {
-            var p = PeriodResolver.Resolve(pKey);
-            if (p == null)
+            var range = intent.ComparisonRanges[index];
+            var whereClauses = new List<string>();
+            var labelParameter = $"$p{parameterIndex++}";
+            var sortParameter = $"$p{parameterIndex++}";
+            var fromParameter = $"$p{parameterIndex++}";
+            var toParameter = $"$p{parameterIndex++}";
+
+            parameters[labelParameter] = range.Label;
+            parameters[sortParameter] = index;
+            parameters[fromParameter] = range.FromUtc.ToString("yyyy-MM-dd HH:mm:ss");
+            parameters[toParameter] = range.ToExclusiveUtc.ToString("yyyy-MM-dd HH:mm:ss");
+
+            whereClauses.Add($"{range.DateColumn} >= {fromParameter} AND {range.DateColumn} < {toParameter}");
+            AppendFilterClauses(intent.Filters, whereClauses, parameters, ref parameterIndex);
+
+            innerSelects.Add(
+                $"SELECT {sortParameter} AS __sort, {labelParameter} AS period, {BuildMetricExpression(intent.Metric)} AS \"{intent.Metric.Key}\" " +
+                $"FROM {intent.Source.Table} WHERE {string.Join(" AND ", whereClauses)}");
+        }
+
+        var sqlBuilder = new StringBuilder();
+        sqlBuilder.Append("SELECT period, \"").Append(intent.Metric.Key).Append("\" FROM (");
+        sqlBuilder.Append(string.Join(" UNION ALL ", innerSelects));
+        sqlBuilder.Append(") ");
+
+        if (intent.Sort.Count > 0)
+        {
+            sqlBuilder.Append("ORDER BY ");
+            sqlBuilder.Append(string.Join(", ", intent.Sort.Select(sort =>
             {
-                periodLines.Add($"`{pKey}` — не удалось разрешить");
+                var alias = sort.Alias == intent.Metric.Key || sort.Alias == "period" ? sort.Alias : "__sort";
+                return $"\"{alias}\" {sort.Direction.ToUpperInvariant()}";
+            })));
+            sqlBuilder.Append(' ');
+        }
+        else
+        {
+            sqlBuilder.Append("ORDER BY __sort ASC ");
+        }
+
+        sqlBuilder.Append($"LIMIT {intent.Limit}");
+
+        var sql = sqlBuilder.ToString();
+        return new BuiltSql(sql, parameters, BuildSignature(sql, parameters));
+    }
+
+    private static string BuildMetricExpression(MetricDefinition metric) => metric.Aggregation switch
+    {
+        "count" => $"COUNT({metric.Expression})",
+        "sum" => $"ROUND(SUM({metric.Expression}), 2)",
+        "avg" => $"ROUND(AVG({metric.Expression}), 2)",
+        "formula" => metric.Expression,
+        _ => throw new InvalidOperationException($"Unsupported aggregation: {metric.Aggregation}")
+    };
+
+    private static void AppendFilterClauses(
+        IReadOnlyList<ValidatedFilter> filters,
+        ICollection<string> whereClauses,
+        IDictionary<string, object?> parameters,
+        ref int parameterIndex)
+    {
+        foreach (var filter in filters)
+        {
+            if (filter.Operator is "in" or "not_in")
+            {
+                var parameterNames = new List<string>();
+                foreach (var value in filter.Values)
+                {
+                    var parameterName = $"$p{parameterIndex++}";
+                    parameterNames.Add(parameterName);
+                    parameters[parameterName] = value;
+                }
+
+                whereClauses.Add($"{filter.Definition.Column} {(filter.Operator == "in" ? "IN" : "NOT IN")} ({string.Join(", ", parameterNames)})");
                 continue;
             }
-            var fromKey = $"$f{i}";
-            var toKey = $"$t{i}";
-            pars[fromKey] = p.From.ToString("yyyy-MM-dd HH:mm:ss");
-            pars[toKey] = p.To.ToString("yyyy-MM-dd HH:mm:ss");
 
-            var filter = string.IsNullOrEmpty(metric.Filter) ? "" : $"{metric.Filter} AND ";
-            selects.Add(
-                $"SELECT '{p.Label}' AS period, {metric.Aggregation}({metric.Expression}) AS \"{metric.Key}\" " +
-                $"FROM {metric.Table} WHERE {filter}order_timestamp >= {fromKey} AND order_timestamp < {toKey}"
-            );
-            humanPeriods.Add(p.Label);
-            periodLines.Add(DescribePeriodResolution(pKey, p));
-            periodLines.Add($"`{pKey}` -> **{p.Label}**: \u0441 {p.From:yyyy-MM-dd} \u043f\u043e {p.To.AddSeconds(-1):yyyy-MM-dd}");
-            i++;
-        }
-
-        trail.Add(new ReasoningStep("📅",
-            "Периоды для сравнения",
-            string.Join("\n", periodLines)));
-
-        if (intent.Filters != null && intent.Filters.Count > 0)
-            trail.Add(new ReasoningStep("🔎",
-                "Фильтры",
-                string.Join(", ", intent.Filters.Select(kv => $"`{kv.Key}` = `{kv.Value}`"))));
-
-        if (selects.Count < 2)
-            throw new InvalidOperationException("Для сравнения нужно минимум 2 периода");
-
-        trail.Add(new ReasoningStep("🧩",
-            "Шаблон: сравнение периодов",
-            $"Строю {selects.Count} независимых SELECT по шаблону и объединяю через `UNION ALL` — получаю таблицу «период → значение метрики»."));
-
-        var sql = string.Join(" UNION ALL ", selects) + $" LIMIT {_maxRows}";
-        var human = $"Сравнение метрики «{metric.DisplayName}» между периодами: {string.Join(" vs ", humanPeriods)}.";
-        var tech = $"Шаблон: compare_periods | метрика={metric.Key} | periods={string.Join(",", intent.Periods!)}";
-        return new BuiltSql(sql, pars, human, tech, trail);
-    }
-
-    private static string DescribePeriodResolution(string? periodKey, PeriodRange period)
-    {
-        var from = period.From.ToString("yyyy-MM-dd");
-        var to = period.To.AddSeconds(-1).ToString("yyyy-MM-dd");
-
-        return periodKey switch
-        {
-            "current_year" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u044d\u0442\u043e\u0442 \u0433\u043e\u0434\u00bb \u043a\u0430\u043a {period.From.Year} \u0433\u043e\u0434: \u0441 {from} \u043f\u043e {to}.",
-            "previous_year" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u043f\u0440\u043e\u0448\u043b\u044b\u0439 \u0433\u043e\u0434\u00bb \u043a\u0430\u043a {period.From.Year} \u0433\u043e\u0434: \u0441 {from} \u043f\u043e {to}.",
-            "current_month" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043c\u0435\u0441\u044f\u0446\u00bb \u043a\u0430\u043a \u043f\u0435\u0440\u0438\u043e\u0434 \u0441 {from} \u043f\u043e {to}.",
-            "last_month" => $"\u041f\u043e\u043d\u044f\u043b \u00ab\u043f\u0440\u043e\u0448\u043b\u044b\u0439 \u043c\u0435\u0441\u044f\u0446\u00bb \u043a\u0430\u043a \u043f\u0435\u0440\u0438\u043e\u0434 \u0441 {from} \u043f\u043e {to}.",
-            _ => $"\u041f\u0435\u0440\u0438\u043e\u0434 \u00ab{period.Label}\u00bb: \u0441 {from} \u043f\u043e {to}."
-        };
-    }
-
-    private static void ApplyFilters(Dictionary<string, string>? filters, List<string> where, Dictionary<string, object?> pars)
-    {
-        if (filters == null) return;
-        var idx = 0;
-        foreach (var kv in filters)
-        {
-            var col = kv.Key.ToLowerInvariant() switch
-            {
-                "city" or "city_id" => "city_id",
-                "status" or "status_order" => "status_order",
-                _ => null
-            };
-            if (col == null) continue;
-            var p = $"$flt{idx++}";
-            where.Add($"{col} = {p}");
-            pars[p] = kv.Value;
+            var singleParameter = $"$p{parameterIndex++}";
+            parameters[singleParameter] = filter.Values[0];
+            whereClauses.Add($"{filter.Definition.Column} {ToSqlOperator(filter.Operator)} {singleParameter}");
         }
     }
 
-    private static void ApplyFiltersHuman(Dictionary<string, string>? filters, List<string> parts)
+    private static void AppendOrderBy(StringBuilder sqlBuilder, IReadOnlyList<ValidatedSort> sort)
     {
-        if (filters == null) return;
-        foreach (var kv in filters)
-            parts.Add($"фильтр {kv.Key} = {kv.Value}");
+        if (sort.Count == 0)
+            return;
+
+        sqlBuilder.Append("ORDER BY ");
+        sqlBuilder.Append(string.Join(
+            ", ",
+            sort.Select(item => $"\"{item.Alias}\" {item.Direction.ToUpperInvariant()}")));
+        sqlBuilder.Append(' ');
     }
 
-    private static string FormatFilters(Dictionary<string, string>? filters) =>
-        filters == null || filters.Count == 0 ? "-" : string.Join(",", filters.Select(kv => $"{kv.Key}={kv.Value}"));
+    private static string ToSqlOperator(string operatorKey) => operatorKey switch
+    {
+        "=" => "=",
+        "!=" => "!=",
+        ">" => ">",
+        ">=" => ">=",
+        "<" => "<",
+        "<=" => "<=",
+        _ => throw new InvalidOperationException($"Unsupported operator: {operatorKey}")
+    };
+
+    private static string BuildSignature(string sql, IReadOnlyDictionary<string, object?> parameters)
+    {
+        var normalizedSql = string.Join(" ", sql.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        var normalizedParameters = string.Join(
+            ";",
+            parameters
+                .OrderBy(item => item.Key, StringComparer.Ordinal)
+                .Select(item => $"{item.Key}={IntentValueHelper.ToDisplayString(item.Value)}"));
+
+        return $"{normalizedSql}|{normalizedParameters}";
+    }
 }

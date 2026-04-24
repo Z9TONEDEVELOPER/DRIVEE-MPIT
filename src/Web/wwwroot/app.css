@@ -84,6 +84,53 @@ h1:focus {
 .bi-brand-title { font-weight: 700; font-size: 15px; }
 .bi-brand-sub { font-size: 11px; color: #94a3b8; }
 
+.bi-user-card {
+    padding: 12px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.96));
+    border: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.bi-user-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.bi-user-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.bi-user-meta {
+    font-size: 12px;
+    color: #cbd5e1;
+    line-height: 1.4;
+}
+
+.bi-logout-btn {
+    width: 100%;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.bi-logout-btn:hover {
+    background: #1f2937;
+    border-color: #4f46e5;
+    color: #fff;
+}
+
 .bi-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; margin-top: 6px; }
 
 .bi-templates { display: flex; flex-direction: column; gap: 6px; }
@@ -534,3 +581,223 @@ h1:focus {
 .bi-bubble-result .bi-warn { margin-top: 8px; padding: 6px 10px; background: #fffbeb; border-radius: 6px; color: #92400e; font-size: 12.5px; }
 .bi-bubble-result .bi-explain-llm { margin-top: 4px; }
 .bi-bubble-result .bi-error { margin: 14px; padding: 12px 14px; }
+
+/* ================= Auth & Admin ================= */
+.auth-shell {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 32px 20px;
+    background:
+        radial-gradient(circle at top left, rgba(79, 70, 229, 0.18), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(6, 182, 212, 0.14), transparent 28%),
+        #f7f8fb;
+}
+
+.auth-card {
+    width: min(460px, 100%);
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #e5e7eb;
+    border-radius: 24px;
+    padding: 28px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+}
+
+.auth-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+}
+
+.auth-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.auth-subtitle {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.auth-card h1 {
+    margin: 0 0 10px;
+    font-size: 28px;
+    line-height: 1.15;
+    color: #0f172a;
+}
+
+.auth-copy {
+    margin: 0 0 20px;
+    color: #475569;
+    line-height: 1.6;
+}
+
+.auth-form {
+    display: grid;
+    gap: 10px;
+}
+
+.auth-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+}
+
+.auth-input {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: #0f172a;
+    background: #fff;
+}
+
+.auth-input:focus {
+    outline: none;
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+}
+
+.auth-submit {
+    margin-top: 6px;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, #4f46e5, #4338ca);
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 14px 30px rgba(79, 70, 229, 0.22);
+}
+
+.auth-submit:hover {
+    transform: translateY(-1px);
+}
+
+.auth-footnote {
+    margin-top: 18px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #64748b;
+}
+
+.auth-error {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 13px;
+}
+
+.auth-access-denied {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: #f7f8fb;
+}
+
+.auth-access-card {
+    width: min(480px, 100%);
+    background: #fff;
+    border-radius: 20px;
+    border: 1px solid #e5e7eb;
+    padding: 28px;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.1);
+    text-align: center;
+}
+
+.auth-access-card h1 {
+    margin: 0 0 10px;
+    color: #0f172a;
+}
+
+.auth-access-card p {
+    margin: 0 0 18px;
+    color: #475569;
+}
+
+.auth-link {
+    color: #4338ca;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.auth-link:hover {
+    text-decoration: underline;
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 18px;
+    padding: 24px 28px;
+    background: #f7f8fb;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.admin-facts {
+    margin-top: 14px;
+    display: grid;
+    gap: 10px;
+    color: #334155;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.admin-user-name {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.admin-user-sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.admin-role {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+
+.admin-role.admin {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+    color: #4338ca;
+}
+
+.admin-role.user {
+    background: #ecfeff;
+    border-color: #a5f3fc;
+    color: #0f766e;
+}
+
+@media (max-width: 960px) {
+    .bi-workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+
+    .bi-sidebar,
+    .bi-chat-main {
+        height: auto;
+    }
+
+    .admin-grid {
+        grid-template-columns: 1fr;
+    }
+}

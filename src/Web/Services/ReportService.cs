@@ -7,6 +7,7 @@ namespace DriveeDataSpace.Web.Services;
 
 public class ReportService
 {
+    private const int BusyTimeoutMs = 5_000;
     private readonly string _db;
 
     public ReportService(IConfiguration cfg, IHostEnvironment environment)
@@ -19,8 +20,8 @@ public class ReportService
 
     private void EnsureSchema()
     {
-        using var c = new SqliteConnection($"Data Source={_db}");
-        c.Open();
+        using var c = OpenConnection();
+        EnsurePragmas(c);
         using var cmd = c.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS reports (
@@ -38,8 +39,7 @@ public class ReportService
 
     public int Save(Report r)
     {
-        using var c = new SqliteConnection($"Data Source={_db}");
-        c.Open();
+        using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = @"INSERT INTO reports(name,user_query,intent_json,sql_text,visualization,author,created_at)
                             VALUES($n,$q,$i,$s,$v,$a,$t); SELECT last_insert_rowid();";
@@ -55,39 +55,95 @@ public class ReportService
 
     public List<Report> List()
     {
-        var list = new List<Report>();
-        using var c = new SqliteConnection($"Data Source={_db}");
-        c.Open();
+        using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports ORDER BY id DESC";
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
-        {
-            list.Add(new Report
-            {
-                Id = r.GetInt32(0),
-                Name = r.GetString(1),
-                UserQuery = r.GetString(2),
-                IntentJson = r.GetString(3),
-                Sql = r.GetString(4),
-                Visualization = r.GetString(5),
-                Author = r.GetString(6),
-                CreatedAt = DateTime.Parse(r.GetString(7))
-            });
-        }
-        return list;
+        return ReadReports(cmd);
+    }
+
+    public List<Report> ListForAuthor(string author)
+    {
+        using var c = OpenConnection();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at
+            FROM reports
+            WHERE lower(author) = $author
+            ORDER BY id DESC";
+        cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
+        return ReadReports(cmd);
     }
 
     public Report? Get(int id)
     {
-        using var c = new SqliteConnection($"Data Source={_db}");
-        c.Open();
+        using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id";
         cmd.Parameters.AddWithValue("$id", id);
+        return ReadSingle(cmd);
+    }
+
+    public Report? GetForAuthor(int id, string author, bool isAdmin)
+    {
+        using var c = OpenConnection();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = isAdmin
+            ? "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id"
+            : "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id AND lower(author)=$author";
+        cmd.Parameters.AddWithValue("$id", id);
+        if (!isAdmin)
+        {
+            cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
+        }
+
+        return ReadSingle(cmd);
+    }
+
+    public void Delete(int id)
+    {
+        using var c = OpenConnection();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM reports WHERE id=$id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteForAuthor(int id, string author, bool isAdmin)
+    {
+        using var c = OpenConnection();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = isAdmin
+            ? "DELETE FROM reports WHERE id=$id"
+            : "DELETE FROM reports WHERE id=$id AND lower(author)=$author";
+        cmd.Parameters.AddWithValue("$id", id);
+        if (!isAdmin)
+        {
+            cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
+        }
+
+        cmd.ExecuteNonQuery();
+    }
+
+    private static List<Report> ReadReports(SqliteCommand cmd)
+    {
+        var list = new List<Report>();
         using var r = cmd.ExecuteReader();
-        if (!r.Read()) return null;
-        return new Report
+        while (r.Read())
+        {
+            list.Add(ReadReport(r));
+        }
+
+        return list;
+    }
+
+    private static Report? ReadSingle(SqliteCommand cmd)
+    {
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? ReadReport(r) : null;
+    }
+
+    private static Report ReadReport(SqliteDataReader r) =>
+        new()
         {
             Id = r.GetInt32(0),
             Name = r.GetString(1),
@@ -98,15 +154,31 @@ public class ReportService
             Author = r.GetString(6),
             CreatedAt = DateTime.Parse(r.GetString(7))
         };
+
+    private static string NormalizeAuthor(string author) =>
+        author.Trim().ToLowerInvariant();
+
+    private SqliteConnection OpenConnection()
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _db,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = true
+        }.ToString();
+
+        var connection = new SqliteConnection(connectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA busy_timeout = {BusyTimeoutMs};";
+        command.ExecuteNonQuery();
+        return connection;
     }
 
-    public void Delete(int id)
+    private static void EnsurePragmas(SqliteConnection connection)
     {
-        using var c = new SqliteConnection($"Data Source={_db}");
-        c.Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "DELETE FROM reports WHERE id=$id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
+        using var journalCommand = connection.CreateCommand();
+        journalCommand.CommandText = "PRAGMA journal_mode = WAL;";
+        _ = journalCommand.ExecuteScalar();
     }
 }

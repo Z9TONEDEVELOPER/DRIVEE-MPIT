@@ -5,7 +5,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <AssemblyName>DriveeDataSpace.Web</AssemblyName>
     <RootNamespace>DriveeDataSpace.Web</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin-*/**;obj-*/**;.codex-build/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

@@ -6,116 +6,173 @@ namespace DriveeDataSpace.Web.Services;
 
 public class NlSqlEngine
 {
-    private readonly LlmService _llm;
-    private readonly SemanticLayer _semantic;
-    private readonly SqlBuilder _builder;
-    private readonly QueryExecutor _executor;
-    private readonly ILogger<NlSqlEngine> _log;
+    private readonly LlmService _llmService;
+    private readonly SemanticLayer _semanticLayer;
+    private readonly IntentValidator _intentValidator;
+    private readonly SqlBuilder _sqlBuilder;
+    private readonly ExplainEngine _explainEngine;
+    private readonly QueryExecutor _queryExecutor;
+    private readonly ILogger<NlSqlEngine> _logger;
 
-    public NlSqlEngine(LlmService llm, SemanticLayer semantic, SqlBuilder builder, QueryExecutor executor, ILogger<NlSqlEngine> log)
+    public NlSqlEngine(
+        LlmService llmService,
+        SemanticLayer semanticLayer,
+        IntentValidator intentValidator,
+        SqlBuilder sqlBuilder,
+        ExplainEngine explainEngine,
+        QueryExecutor queryExecutor,
+        ILogger<NlSqlEngine> logger)
     {
-        _llm = llm;
-        _semantic = semantic;
-        _builder = builder;
-        _executor = executor;
-        _log = log;
+        _llmService = llmService;
+        _semanticLayer = semanticLayer;
+        _intentValidator = intentValidator;
+        _sqlBuilder = sqlBuilder;
+        _explainEngine = explainEngine;
+        _queryExecutor = queryExecutor;
+        _logger = logger;
     }
 
     public async Task<PipelineResult> RunAsync(
         string userQuery,
         IReadOnlyList<ChatTurn>? history = null,
         QueryIntent? previousIntent = null,
-        CancellationToken ct = default)
+        CancellationToken cancellationToken = default)
     {
-        var pr = new PipelineResult { UserQuery = userQuery };
+        var pipelineResult = new PipelineResult { UserQuery = userQuery };
+
         try
         {
-            var system = PromptTemplates.SystemPrompt(_semantic);
-            var intent = await _llm.InterpretAsync(userQuery, system, history, previousIntent, ct);
-            pr.Intent = intent;
-            pr.Confidence = intent.Confidence;
-            pr.Visualization = intent.VisualizationHint;
+            var rawIntent = await _llmService.InterpretAsync(
+                userQuery,
+                PromptTemplates.SystemPrompt(_semanticLayer),
+                history,
+                cancellationToken);
 
-            if (intent.Kind == "chat" || intent.Kind == "clarify")
+            var validation = _intentValidator.ValidateParsedIntent(rawIntent, userQuery, previousIntent);
+            pipelineResult.Intent = validation.NormalizedIntent;
+            pipelineResult.Confidence = validation.NormalizedIntent.Confidence;
+            pipelineResult.Visualization = validation.NormalizedIntent.Visualization ?? validation.NormalizedIntent.VisualizationHint ?? "table";
+            pipelineResult.Warnings.AddRange(validation.Warnings);
+
+            if (validation.RequiresClarification || validation.NormalizedIntent.Kind == QueryIntentKinds.Chat)
             {
-                pr.IsChat = true;
-                pr.ChatReply = !string.IsNullOrWhiteSpace(intent.Reply)
-                    ? intent.Reply
-                    : "Я BI-ассистент Drivee. Спросите про заказы, выручку или отмены — например: «Выручка по месяцам».";
-                return pr;
+                pipelineResult.IsChat = true;
+                pipelineResult.ChatReply = validation.RequiresClarification
+                    ? validation.Clarification
+                    : validation.NormalizedIntent.Reply ?? "Сформулируйте аналитический запрос, и я подготовлю intent.";
+                return pipelineResult;
             }
 
-            if (_semantic.ResolveMetric(intent.Metric) == null)
-            {
-                pr.Error = $"Метрика «{intent.Metric}» не найдена в семантическом слое.";
-                return pr;
-            }
+            if (validation.ValidatedIntent == null)
+                throw new InvalidOperationException("Validated intent is missing.");
 
-            if (intent.Confidence < 0.4)
-                pr.Warnings.Add($"Низкая уверенность ({intent.Confidence:P0}). Уточните запрос.");
+            var validatedIntent = validation.ValidatedIntent;
+            var builtSql = _sqlBuilder.Build(validatedIntent);
+            EnsureDifferentIntentsProduceDifferentSql(previousIntent, validatedIntent, builtSql);
 
-            var built = _builder.Build(intent, userQuery);
-            pr.Sql = FormatSqlForDisplay(built.Sql, built.Parameters);
-            pr.Explain = built.HumanExplain;
-            pr.TechnicalExplain = built.TechExplain;
-            pr.ReasoningTrail = built.ReasoningTrail;
-            pr.ReasoningTrail.Add(new Models.ReasoningStep(
-                "⚙️",
+            _logger.LogInformation("Validated intent: {Intent}", JsonSerializer.Serialize(validatedIntent.NormalizedIntent));
+            _logger.LogInformation("Generated SQL: {Sql}", builtSql.Sql);
+
+            var explainResult = _explainEngine.Build(validatedIntent, builtSql, userQuery);
+            pipelineResult.Intent = validatedIntent.NormalizedIntent;
+            pipelineResult.Confidence = validatedIntent.NormalizedIntent.Confidence;
+            pipelineResult.Visualization = validatedIntent.Visualization;
+            pipelineResult.StructuredExplain = explainResult.Structured;
+            pipelineResult.Explain = explainResult.Summary;
+            pipelineResult.TechnicalExplain = explainResult.Technical;
+            pipelineResult.ReasoningTrail = explainResult.Trail;
+            pipelineResult.Sql = FormatSqlForDisplay(builtSql.Sql, builtSql.Parameters);
+            pipelineResult.ReasoningTrail.Add(new ReasoningStep(
+                "SQL",
                 "SQL-запрос",
-                "Итоговый безопасный SELECT (read-only, параметризованный, с LIMIT):",
-                pr.Sql));
-            pr.ReasoningTrail.Add(new Models.ReasoningStep(
-                "❓",
-                "Я правильно понял?",
-                "Если какая-то деталь (метрика, период, группировка) разошлась с вашим намерением — напишите уточнение в чат, и я пересоберу запрос."));
+                "Финальный SQL собран кодом из валидированного intent и semantic layer.",
+                pipelineResult.Sql));
 
-            pr.Result = _executor.Execute(built.Sql, built.Parameters);
-            if (pr.Result.RowCount == 0) pr.Warnings.Add("Запрос выполнен, но данных нет.");
+            if (validatedIntent.NormalizedIntent.Confidence < 0.5)
+            {
+                pipelineResult.Warnings.Add(
+                    $"Низкая уверенность интерпретации ({validatedIntent.NormalizedIntent.Confidence:P0}). Проверьте, как система поняла запрос.");
+            }
+
+            pipelineResult.Result = _queryExecutor.Execute(builtSql, validatedIntent);
+            if (pipelineResult.Result.RowCount == 0)
+                pipelineResult.Warnings.Add("Запрос выполнен, но данных по выбранным условиям нет.");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _log.LogError(ex, "Pipeline failed");
-            pr.Error = ex.Message;
+            _logger.LogError(exception, "NL→SQL pipeline failed.");
+            pipelineResult.Error = exception.Message;
         }
-        return pr;
+
+        return pipelineResult;
     }
 
-    public PipelineResult ReplayFromReport(string intentJson, CancellationToken ct = default)
+    public PipelineResult ReplayFromReport(string intentJson, CancellationToken cancellationToken = default)
     {
-        var pr = new PipelineResult();
-        var intent = JsonSerializer.Deserialize<QueryIntent>(intentJson)
-                     ?? throw new InvalidOperationException("Bad report intent JSON");
-        pr.Intent = intent;
-        pr.Confidence = intent.Confidence;
-        pr.Visualization = intent.VisualizationHint;
+        var storedIntent = JsonSerializer.Deserialize<QueryIntent>(intentJson, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        }) ?? throw new InvalidOperationException("Bad report intent JSON.");
 
-        var built = _builder.Build(intent, null);
-        pr.Sql = FormatSqlForDisplay(built.Sql, built.Parameters);
-        pr.Explain = built.HumanExplain + " (повторный запуск)";
-        pr.TechnicalExplain = built.TechExplain;
-        pr.ReasoningTrail = built.ReasoningTrail;
-        pr.ReasoningTrail.Add(new Models.ReasoningStep(
-            "⚙️",
+        var validatedIntent = _intentValidator.ValidateStoredIntent(storedIntent);
+        var builtSql = _sqlBuilder.Build(validatedIntent);
+        var explainResult = _explainEngine.Build(validatedIntent, builtSql, string.Empty, isReplay: true);
+
+        var pipelineResult = new PipelineResult
+        {
+            Intent = validatedIntent.NormalizedIntent,
+            Confidence = validatedIntent.NormalizedIntent.Confidence,
+            Visualization = validatedIntent.Visualization,
+            StructuredExplain = explainResult.Structured,
+            Explain = explainResult.Summary,
+            TechnicalExplain = explainResult.Technical,
+            ReasoningTrail = explainResult.Trail,
+            Sql = FormatSqlForDisplay(builtSql.Sql, builtSql.Parameters),
+            Result = _queryExecutor.Execute(builtSql, validatedIntent)
+        };
+
+        pipelineResult.ReasoningTrail.Add(new ReasoningStep(
+            "SQL",
             "SQL-запрос",
-            "Итоговый SELECT (повторный запуск сохранённого отчёта):",
-            pr.Sql));
-        pr.Result = _executor.Execute(built.Sql, built.Parameters);
-        return pr;
+            "SQL пересобран кодом из сохранённого intent.",
+            pipelineResult.Sql));
+
+        return pipelineResult;
     }
 
-    private static string FormatSqlForDisplay(string sql, Dictionary<string, object?> pars)
+    private void EnsureDifferentIntentsProduceDifferentSql(QueryIntent? previousIntent, ValidatedIntent currentIntent, BuiltSql currentSql)
     {
-        var display = sql;
-        foreach (var kv in pars.OrderByDescending(k => k.Key.Length))
+        if (previousIntent == null || !string.Equals(previousIntent.Kind, QueryIntentKinds.Query, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
         {
-            var v = kv.Value switch
+            var validatedPreviousIntent = _intentValidator.ValidateStoredIntent(previousIntent);
+            var previousSql = _sqlBuilder.Build(validatedPreviousIntent);
+            SqlGuard.EnsureDifferentIntentProducesDifferentSql(validatedPreviousIntent, previousSql, currentIntent, currentSql);
+        }
+        catch (InvalidOperationException exception) when (!exception.Message.StartsWith("Guardrails:", StringComparison.Ordinal))
+        {
+            _logger.LogDebug(exception, "Skipping previous intent differentiation check because stored previous intent could not be validated.");
+        }
+    }
+
+    private static string FormatSqlForDisplay(string sql, IReadOnlyDictionary<string, object?> parameters)
+    {
+        var formattedSql = sql;
+        foreach (var parameter in parameters.OrderByDescending(item => item.Key.Length))
+        {
+            var renderedValue = parameter.Value switch
             {
                 null => "NULL",
-                string s => $"'{s.Replace("'", "''")}'",
-                _ => kv.Value.ToString() ?? "NULL"
+                string stringValue => $"'{stringValue.Replace("'", "''", StringComparison.Ordinal)}'",
+                bool boolValue => boolValue ? "1" : "0",
+                _ => parameter.Value.ToString() ?? "NULL"
             };
-            display = display.Replace(kv.Key, v);
+
+            formattedSql = formattedSql.Replace(parameter.Key, renderedValue, StringComparison.Ordinal);
         }
-        return display;
+
+        return formattedSql;
     }
 }

@@ -1,9 +1,9 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DriveeDataSpace.Web.Models;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 
 namespace DriveeDataSpace.Web.Services;
@@ -12,327 +12,571 @@ public record ChatTurn(string Role, string Content);
 
 public class LlmService
 {
-    private readonly HttpClient _http;
-    private readonly ILogger<LlmService> _log;
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<LlmService> _logger;
     private readonly string _endpoint;
     private readonly string _model;
+    private readonly bool _usesSimpleChatApi;
 
-    public LlmService(IHttpClientFactory factory, IConfiguration cfg, ILogger<LlmService> log)
+    public LlmService(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<LlmService> logger)
     {
-        _http = factory.CreateClient("llm");
-        _log = log;
-        _endpoint = cfg["Llm:Endpoint"] ?? "http://localhost:1234/v1/chat/completions";
-        _model = cfg["Llm:Model"] ?? "local-model";
-        var timeout = int.TryParse(cfg["Llm:TimeoutSeconds"], out var t) ? t : 60;
-        _http.Timeout = TimeSpan.FromSeconds(timeout);
+        _httpClient = httpClientFactory.CreateClient("llm");
+        _logger = logger;
+        _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
+        _model = configuration["Llm:Model"] ?? "local-model";
+        _usesSimpleChatApi = _endpoint.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase);
+        var timeoutSeconds = int.TryParse(configuration["Llm:TimeoutSeconds"], out var timeout) ? timeout : 60;
+        _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
     }
 
     public async Task<QueryIntent> InterpretAsync(
         string userQuery,
         string systemPrompt,
         IReadOnlyList<ChatTurn>? history = null,
-        QueryIntent? previousIntent = null,
-        CancellationToken ct = default)
+        CancellationToken cancellationToken = default)
     {
-        var messages = new List<object> { new { role = "system", content = systemPrompt } };
-        if (history != null)
-        {
-            foreach (var t in history.TakeLast(8))
-                messages.Add(new { role = t.Role, content = t.Content });
-        }
-        messages.Add(new { role = "user", content = userQuery });
+        var payload = BuildPayload(userQuery, systemPrompt, history);
 
-        var payload = new { model = _model, temperature = 0.1, messages = messages.ToArray() };
-
-        var json = JsonSerializer.Serialize(payload);
-        using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-
-        string content;
         try
         {
-            using var resp = await _http.SendAsync(req, ct);
-            var body = await resp.Content.ReadAsStringAsync(ct);
-            if (!resp.IsSuccessStatusCode)
-                throw new InvalidOperationException($"LLM HTTP {(int)resp.StatusCode}: {body}");
-            content = ExtractContent(body);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _log.LogWarning(ex, "LLM unreachable, falling back to heuristic");
-            return HeuristicFallback(userQuery, previousIntent);
-        }
+            using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
 
-        var jsonText = ExtractJson(content);
-        try
-        {
-            var intent = JsonSerializer.Deserialize<QueryIntent>(jsonText, new JsonSerializerOptions
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"LLM HTTP {(int)response.StatusCode}: {responseBody}");
+
+            var content = ExtractContent(responseBody);
+            var json = ExtractJson(content);
+            var parsedIntent = JsonSerializer.Deserialize<QueryIntent>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
-            if (intent == null) return HeuristicFallback(userQuery, previousIntent);
-            MergeWithPrevious(intent, previousIntent);
-            ApplyExplicitPeriodHints(intent, userQuery);
-            return intent;
+
+            return parsedIntent ?? HeuristicFallback(userQuery);
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            _log.LogWarning("LLM returned non-JSON: {C}", content);
-            var fb = HeuristicFallback(userQuery, previousIntent);
-            fb.Explanation = "LLM вернул неразбираемый ответ. Использована эвристика.";
-            return fb;
+            _logger.LogWarning(exception, "LLM interpretation failed. Falling back to heuristic parser.");
+            return HeuristicFallback(userQuery);
         }
     }
 
-    private static void MergeWithPrevious(QueryIntent current, QueryIntent? prev)
+    private static string ExtractContent(string responseBody)
     {
-        if (prev == null || prev.Kind != "query") return;
-        if (current.Kind != "query") return;
-        // If current looks like a refinement (missing period/group but same metric), inherit
-        if (string.IsNullOrEmpty(current.Period) && !string.IsNullOrEmpty(prev.Period))
-            current.Period = prev.Period;
-        if (string.IsNullOrEmpty(current.GroupBy) && !string.IsNullOrEmpty(prev.GroupBy))
-            current.GroupBy = prev.GroupBy;
-        if (current.Filters == null && prev.Filters != null)
-            current.Filters = prev.Filters;
-    }
+        using var document = JsonDocument.Parse(responseBody);
+        var root = document.RootElement;
 
-    private static void ApplyExplicitPeriodHints(QueryIntent intent, string userQuery)
-    {
-        if (intent.Kind != "query") return;
-
-        if (TryExtractRollingDaysPeriod(userQuery, out var rollingPeriod))
-            intent.Period = rollingPeriod;
-    }
-
-    private static bool TryExtractRollingDaysPeriod(string query, out string? period)
-    {
-        var lower = query.ToLowerInvariant();
-        var match = Regex.Match(
-            lower,
-            @"(?:(?:за|for|last)\s+)?(?:последн\w*\s+)?(\d{1,3})\s*(?:дн(?:ей|я|ь)?|days?)",
-            RegexOptions.CultureInvariant);
-
-        if (!match.Success || !int.TryParse(match.Groups[1].Value, out var days) || days <= 0)
+        if (root.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0)
         {
-            period = null;
-            return false;
+            var firstChoice = choices[0];
+            if (firstChoice.TryGetProperty("message", out var message) &&
+                message.TryGetProperty("content", out var content))
+            {
+                return content.GetString() ?? string.Empty;
+            }
+
+            if (firstChoice.TryGetProperty("text", out var text))
+                return text.GetString() ?? string.Empty;
         }
 
-        var matchedText = match.Value;
-        var hasPeriodCue = matchedText.Contains("за") || matchedText.Contains("послед") || matchedText.Contains("last") || matchedText.Contains("for");
-        if (!hasPeriodCue)
+        if (root.TryGetProperty("output", out var output))
         {
-            period = null;
-            return false;
+            if (output.ValueKind == JsonValueKind.String)
+                return output.GetString() ?? string.Empty;
+
+            if (output.ValueKind == JsonValueKind.Array)
+            {
+                string? messageContent = null;
+                var chunks = new List<string>();
+                foreach (var item in output.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.String)
+                        continue;
+
+                    var content = contentElement.GetString();
+                    if (string.IsNullOrWhiteSpace(content))
+                        continue;
+
+                    chunks.Add(content);
+
+                    if (item.TryGetProperty("type", out var typeElement) &&
+                        string.Equals(typeElement.GetString(), "message", StringComparison.OrdinalIgnoreCase))
+                    {
+                        messageContent = content;
+                    }
+                }
+
+                return messageContent ?? string.Join("\n", chunks);
+            }
         }
 
-        period = $"last_{days}_days";
-        return true;
+        if (root.TryGetProperty("response", out var response) && response.ValueKind == JsonValueKind.String)
+            return response.GetString() ?? string.Empty;
+
+        return responseBody;
     }
 
-    private static string ExtractContent(string body)
+    private object BuildPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history)
     {
-        using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-        if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0)
+        if (_usesSimpleChatApi)
         {
-            var first = choices[0];
-            if (first.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var c))
-                return c.GetString() ?? "";
-            if (first.TryGetProperty("text", out var tx))
-                return tx.GetString() ?? "";
+            return new
+            {
+                model = _model,
+                system_prompt = systemPrompt,
+                input = BuildFlatInput(userQuery, history)
+            };
         }
-        if (root.TryGetProperty("output", out var o) && o.ValueKind == JsonValueKind.String)
-            return o.GetString() ?? "";
-        if (root.TryGetProperty("response", out var r) && r.ValueKind == JsonValueKind.String)
-            return r.GetString() ?? "";
-        return body;
+
+        var messages = new List<object> { new { role = "system", content = systemPrompt } };
+        if (history != null)
+        {
+            foreach (var turn in history.TakeLast(8))
+                messages.Add(new { role = turn.Role, content = turn.Content });
+        }
+
+        messages.Add(new { role = "user", content = userQuery });
+        return new
+        {
+            model = _model,
+            temperature = 0.1,
+            messages = messages.ToArray()
+        };
+    }
+
+    private static string BuildFlatInput(string userQuery, IReadOnlyList<ChatTurn>? history)
+    {
+        if (history == null || history.Count == 0)
+            return userQuery;
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Conversation context:");
+
+        foreach (var turn in history.TakeLast(8))
+        {
+            builder
+                .Append("- ")
+                .Append(turn.Role)
+                .Append(": ")
+                .AppendLine(turn.Content);
+        }
+
+        builder.AppendLine();
+        builder.Append("Current user query: ").Append(userQuery);
+        return builder.ToString();
     }
 
     private static string ExtractJson(string content)
     {
-        var fence = Regex.Match(content, @"```(?:json)?\s*(\{[\s\S]*?\})\s*```", RegexOptions.IgnoreCase);
-        if (fence.Success) return fence.Groups[1].Value;
+        var fenced = Regex.Match(content, @"```(?:json)?\s*(\{[\s\S]*?\})\s*```", RegexOptions.IgnoreCase);
+        if (fenced.Success)
+            return fenced.Groups[1].Value;
 
-        var first = content.IndexOf('{');
-        var last = content.LastIndexOf('}');
-        if (first >= 0 && last > first) return content.Substring(first, last - first + 1);
-        return content;
+        var firstBrace = content.IndexOf('{');
+        var lastBrace = content.LastIndexOf('}');
+        return firstBrace >= 0 && lastBrace > firstBrace
+            ? content[firstBrace..(lastBrace + 1)]
+            : content;
     }
 
-    public static QueryIntent HeuristicFallback(string q, QueryIntent? previous = null)
+    public static QueryIntent HeuristicFallback(string userQuery)
     {
-        var lower = q.ToLowerInvariant();
-        var intent = new QueryIntent();
+        var text = userQuery.Trim();
+        var lower = text.ToLowerInvariant();
 
         if (IsSmallTalk(lower))
         {
-            intent.Kind = "chat";
-            intent.Confidence = 0.9;
-            intent.Reply = BuildChatReply(lower);
-            return intent;
-        }
-
-        bool metricMatched = true;
-        if (lower.Contains("выручк") || lower.Contains("revenue") || lower.Contains("доход")) intent.Metric = "revenue";
-        else if (lower.Contains("средн") && lower.Contains("чек")) intent.Metric = "avg_check";
-        else if (lower.Contains("длительност") || lower.Contains("duration") || lower.Contains("продолжит")) intent.Metric = "duration";
-        else if (lower.Contains("расстоян") || lower.Contains("дистанц") || lower.Contains("distance") || lower.Contains(" км")) intent.Metric = "distance";
-        else if ((lower.Contains("доля") || lower.Contains("процент")) && lower.Contains("отмен")) intent.Metric = "cancellation_rate";
-        else if (lower.Contains("отмен") || lower.Contains("cancel")) intent.Metric = "cancellations";
-        else if (lower.Contains("тендер")) intent.Metric = "tenders_per_order";
-        else if (lower.Contains("заказ") || lower.Contains("поездк") || lower.Contains("order")) intent.Metric = "orders";
-        else { intent.Metric = "orders"; metricMatched = false; }
-
-        bool groupMatched = true;
-        if (lower.Contains("город")) intent.GroupBy = "city";
-        else if (lower.Contains("час")) intent.GroupBy = "hour";
-        else if (lower.Contains("месяц")) intent.GroupBy = "month";
-        else if (lower.Contains("недел")) intent.GroupBy = "week";
-        else if (lower.Contains("статус")) intent.GroupBy = "status";
-        else if (lower.Contains(" дн") || lower.Contains("дат") || lower.StartsWith("дн")) intent.GroupBy = "day";
-        else groupMatched = false;
-
-        bool periodMatched = true;
-        if (lower.Contains("вчера")) intent.Period = "yesterday";
-        else if (lower.Contains("сегодня")) intent.Period = "today";
-        else if (lower.Contains("прошл") && lower.Contains("недел")) intent.Period = "last_week";
-        else if (lower.Contains("прошл") && lower.Contains("месяц")) intent.Period = "last_month";
-        else if (lower.Contains("прошл") && lower.Contains("год")) intent.Period = "previous_year";
-        else if (lower.Contains("текущ") && lower.Contains("год")) intent.Period = "current_year";
-        else if (lower.Contains("7 дн") || lower.Contains("семь дн")) intent.Period = "last_7_days";
-        else if (lower.Contains("30 дн")) intent.Period = "last_30_days";
-        else periodMatched = false;
-
-        if (TryExtractRollingDaysPeriod(q, out var rollingPeriod))
-        {
-            intent.Period = rollingPeriod;
-            periodMatched = true;
-        }
-
-        bool isCompare = lower.Contains("сравн");
-        if (isCompare)
-        {
-            intent.Intent = "compare_periods";
-            intent.Periods = new List<string> { "current_year", "previous_year" };
-            intent.VisualizationHint = "bar";
-        }
-        else
-        {
-            intent.Intent = "aggregate";
-            intent.VisualizationHint = intent.GroupBy switch
+            return new QueryIntent
             {
-                "day" or "week" or "month" => "line",
-                "city" or "channel"         => "bar",
-                null                         => "table",
-                _                            => "bar"
+                Kind = QueryIntentKinds.Chat,
+                Confidence = 1.0,
+                Reply = BuildChatReply(lower)
             };
         }
 
-        // Merge with previous context if this looks like a refinement
-        if (previous != null && previous.Kind == "query")
+        var intent = new QueryIntent
         {
-            if (!metricMatched) { intent.Metric = previous.Metric; metricMatched = true; }
-            if (!groupMatched && !string.IsNullOrEmpty(previous.GroupBy)) { intent.GroupBy = previous.GroupBy; groupMatched = true; }
-            if (!periodMatched && !string.IsNullOrEmpty(previous.Period)) { intent.Period = previous.Period; periodMatched = true; }
+            Kind = QueryIntentKinds.Query,
+            Intent = QueryIntentKinds.MetricQuery,
+            Confidence = 0.45
+        };
+
+        if (lower.Contains("выруч", StringComparison.Ordinal) || lower.Contains("revenue", StringComparison.Ordinal))
+            intent.Metric = "revenue_sum";
+        else if (lower.Contains("средн", StringComparison.Ordinal) && lower.Contains("чек", StringComparison.Ordinal))
+            intent.Metric = "avg_order_price";
+        else if (lower.Contains("длитель", StringComparison.Ordinal) || lower.Contains("duration", StringComparison.Ordinal))
+            intent.Metric = "avg_trip_duration";
+        else if (lower.Contains("расстоя", StringComparison.Ordinal) || lower.Contains("distance", StringComparison.Ordinal) || lower.Contains("дистанц", StringComparison.Ordinal))
+            intent.Metric = "avg_distance_km";
+        else if ((lower.Contains("доля", StringComparison.Ordinal) || lower.Contains("процент", StringComparison.Ordinal)) && lower.Contains("отмен", StringComparison.Ordinal))
+            intent.Metric = "cancellation_rate";
+        else if (lower.Contains("тендер", StringComparison.Ordinal))
+            intent.Metric = "tenders_per_order";
+        else if (lower.Contains("заказ", StringComparison.Ordinal) || lower.Contains("поезд", StringComparison.Ordinal) || lower.Contains("rides", StringComparison.Ordinal))
+            intent.Metric = "orders_count";
+
+        if (lower.Contains("город", StringComparison.Ordinal))
+            intent.Dimensions.Add("city");
+        else if (lower.Contains("по дням", StringComparison.Ordinal) || lower.Contains("дата", StringComparison.Ordinal))
+            intent.Dimensions.Add("day");
+        else if (lower.Contains("недел", StringComparison.Ordinal))
+            intent.Dimensions.Add("week");
+        else if (lower.Contains("месяц", StringComparison.Ordinal))
+            intent.Dimensions.Add("month");
+        else if (lower.Contains("час", StringComparison.Ordinal))
+            intent.Dimensions.Add("hour");
+        else if (lower.Contains("статус", StringComparison.Ordinal))
+            intent.Dimensions.Add("status_order");
+
+        if (lower.Contains("отмен", StringComparison.Ordinal))
+        {
+            intent.Metric ??= "orders_count";
+            intent.Filters.Add(new IntentFilter
+            {
+                Field = "status_order",
+                Operator = "=",
+                Value = "cancelled"
+            });
+        }
+        else if (lower.Contains("заверш", StringComparison.Ordinal) || lower.Contains("completed", StringComparison.Ordinal) || lower.Contains("done", StringComparison.Ordinal))
+        {
+            intent.Metric ??= "orders_count";
+            intent.Filters.Add(new IntentFilter
+            {
+                Field = "status_order",
+                Operator = "=",
+                Value = "done"
+            });
         }
 
-        // Dynamic confidence: sum up signals actually detected
-        double confidence = 0.25;
-        if (metricMatched) confidence += 0.35;
-        if (groupMatched) confidence += 0.20;
-        if (periodMatched) confidence += 0.15;
-        if (isCompare) confidence += 0.05;
-        if (q.Trim().Length < 5) confidence *= 0.6;
+        if (TryExtractLegacyComparisonPeriods(lower, out var periods))
+        {
+            intent.Intent = QueryIntentKinds.ComparePeriods;
+            intent.Periods = periods;
+            intent.Visualization = "bar";
+        }
+        else if (TryExtractDateRange(lower, out var dateRange))
+        {
+            intent.DateRange = dateRange;
+        }
 
-        intent.Confidence = Math.Min(Math.Round(confidence, 2), 0.95);
-        intent.Explanation = BuildHeuristicExplanation(intent, metricMatched, groupMatched, periodMatched);
+        var topMatch = Regex.Match(lower, @"(?:топ|top)\s*(\d{1,3})", RegexOptions.CultureInvariant);
+        if (topMatch.Success && int.TryParse(topMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var topN))
+        {
+            intent.Limit = topN;
+            intent.Sort.Add(new QuerySort
+            {
+                Field = intent.Metric ?? "metric",
+                Direction = "desc"
+            });
+        }
+
+        if (lower.Contains("по убыванию", StringComparison.OrdinalIgnoreCase) || lower.Contains("descending", StringComparison.OrdinalIgnoreCase))
+        {
+            intent.Sort.Add(new QuerySort
+            {
+                Field = intent.Metric ?? "metric",
+                Direction = "desc"
+            });
+        }
+        else if (lower.Contains("по возрастанию", StringComparison.OrdinalIgnoreCase) || lower.Contains("ascending", StringComparison.OrdinalIgnoreCase))
+        {
+            intent.Sort.Add(new QuerySort
+            {
+                Field = intent.Metric ?? "metric",
+                Direction = "asc"
+            });
+        }
+
+        intent.Visualization = intent.Visualization ?? InferVisualization(intent, lower);
+        intent.Aggregation = intent.Metric switch
+        {
+            "revenue_sum" => "sum",
+            "avg_order_price" or "avg_trip_duration" or "avg_distance_km" or "tenders_per_order" => "avg",
+            "cancellation_rate" => "formula",
+            _ => "count"
+        };
+
+        var confidence = 0.2;
+        if (!string.IsNullOrWhiteSpace(intent.Metric))
+            confidence += 0.35;
+        if (intent.Dimensions.Count > 0)
+            confidence += 0.15;
+        if (intent.DateRange != null || intent.Periods?.Count > 0)
+            confidence += 0.15;
+        if (intent.Filters.Count > 0)
+            confidence += 0.1;
+        if (intent.Limit.HasValue)
+            confidence += 0.05;
+        if (intent.Intent == QueryIntentKinds.ComparePeriods)
+            confidence += 0.05;
+
+        intent.Confidence = Math.Min(confidence, 0.9);
+        intent.Explanation = BuildExplanation(intent);
         return intent;
     }
 
-    private static string BuildHeuristicExplanation(QueryIntent i, bool m, bool g, bool p)
+    private static bool TryExtractLegacyComparisonPeriods(string text, out List<string>? periods)
+    {
+        periods = null;
+
+        if ((text.Contains("этот год", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий год", StringComparison.OrdinalIgnoreCase)) &&
+            text.Contains("прошлый год", StringComparison.OrdinalIgnoreCase))
+        {
+            periods = new List<string> { "current_year", "previous_year" };
+            return true;
+        }
+
+        if ((text.Contains("этот месяц", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий месяц", StringComparison.OrdinalIgnoreCase)) &&
+            text.Contains("прошлый месяц", StringComparison.OrdinalIgnoreCase))
+        {
+            periods = new List<string> { "current_month", "previous_month" };
+            return true;
+        }
+
+        if ((text.Contains("эта неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("текущая неделя", StringComparison.OrdinalIgnoreCase)) &&
+            text.Contains("прошлая неделя", StringComparison.OrdinalIgnoreCase))
+        {
+            periods = new List<string> { "current_week", "previous_week" };
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractDateRange(string text, out QueryDateRange? dateRange)
+    {
+        dateRange = null;
+
+        var absolute = Regex.Match(
+            text,
+            @"(?:с|from)\s+(?<from>\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})\s+(?:по|to|-)\s+(?<to>\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})",
+            RegexOptions.CultureInvariant);
+        if (absolute.Success)
+        {
+            dateRange = new QueryDateRange
+            {
+                Type = "absolute",
+                Start = absolute.Groups["from"].Value,
+                End = absolute.Groups["to"].Value,
+                DateColumn = SemanticLayer.DefaultDateColumn
+            };
+            return true;
+        }
+
+        var rolling = Regex.Match(
+            text,
+            @"(?:за|for|last|последн\w*\s+)?(?<value>\d{1,3})\s*(?<unit>дн(?:ей|я|ь)?|days?|недел(?:ь|и|ю)?|weeks?|месяц(?:а|ев)?|months?)",
+            RegexOptions.CultureInvariant);
+        if (rolling.Success && int.TryParse(rolling.Groups["value"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0)
+        {
+            var unit = rolling.Groups["unit"].Value;
+            dateRange = new QueryDateRange
+            {
+                Type = unit.Contains("нед", StringComparison.Ordinal) || unit.Contains("week", StringComparison.Ordinal)
+                    ? "last_n_weeks"
+                    : unit.Contains("меся", StringComparison.Ordinal) || unit.Contains("month", StringComparison.Ordinal)
+                        ? "last_n_months"
+                        : "last_n_days",
+                Value = value,
+                DateColumn = SemanticLayer.DefaultDateColumn
+            };
+            return true;
+        }
+
+        if (text.Contains("вчера", StringComparison.OrdinalIgnoreCase) || text.Contains("yesterday", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "yesterday", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("сегодня", StringComparison.OrdinalIgnoreCase) || text.Contains("today", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "today", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("прошлая неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("last week", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "previous_week", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("эта неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("текущая неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("this week", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "current_week", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("прошлый месяц", StringComparison.OrdinalIgnoreCase) || text.Contains("last month", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "previous_month", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("этот месяц", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий месяц", StringComparison.OrdinalIgnoreCase) || text.Contains("this month", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "current_month", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("прошлый год", StringComparison.OrdinalIgnoreCase) || text.Contains("last year", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "previous_year", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        if (text.Contains("этот год", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий год", StringComparison.OrdinalIgnoreCase) || text.Contains("this year", StringComparison.OrdinalIgnoreCase))
+        {
+            dateRange = new QueryDateRange { Type = "current_year", DateColumn = SemanticLayer.DefaultDateColumn };
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string InferVisualization(QueryIntent intent, string lowerText)
+    {
+        if (intent.Intent == QueryIntentKinds.ComparePeriods)
+            return "bar";
+
+        if (lowerText.Contains("доля", StringComparison.OrdinalIgnoreCase) || lowerText.Contains("pie", StringComparison.OrdinalIgnoreCase))
+            return "pie";
+
+        if (intent.Dimensions.Any(dimension => dimension is "day" or "week" or "month" or "hour"))
+            return "line";
+
+        if (intent.Dimensions.Count > 0)
+            return "bar";
+
+        return "table";
+    }
+
+    private static string BuildExplanation(QueryIntent intent)
     {
         var parts = new List<string>();
-        parts.Add(m ? $"метрика «{i.Metric}» распознана" : $"метрика по умолчанию — «{i.Metric}»");
-        if (g) parts.Add($"группировка — {i.GroupBy}");
-        if (p) parts.Add($"период — {i.Period}");
-        if (!p && !g) parts.Add("группировка и период не указаны");
-        return "Локальная эвристика: " + string.Join(", ", parts) + ".";
+        if (!string.IsNullOrWhiteSpace(intent.Metric))
+            parts.Add($"метрика = {intent.Metric}");
+        if (intent.Dimensions.Count > 0)
+            parts.Add($"группировка = {string.Join(", ", intent.Dimensions)}");
+        if (intent.DateRange != null)
+            parts.Add($"period = {intent.DateRange.Type}");
+        if (intent.Filters.Count > 0)
+            parts.Add($"filters = {string.Join(", ", intent.Filters.Select(filter => $"{filter.Field} {filter.Operator} {IntentValueHelper.ToDisplayString(filter.Value)}"))}");
+        if (intent.Periods?.Count > 0)
+            parts.Add($"periods = {string.Join(" vs ", intent.Periods)}");
+
+        return parts.Count == 0
+            ? "Heuristic parser did not extract a stable intent."
+            : "Heuristic parser: " + string.Join("; ", parts) + ".";
     }
 
-    private static bool IsSmallTalk(string lower)
+    private static bool IsSmallTalk(string lowerText)
     {
-        string[] greetings = { "привет", "здравствуй", "здравствуйте", "добрый день", "доброе утро", "добрый вечер", "hello", "hi ", "хай", "ку " };
-        string[] meta = { "кто ты", "что ты умеешь", "что ты можешь", "что умеешь", "что можешь", "расскажи о себе", "о себе", "помощь", "help", "как пользоваться", "как работать", "что это", "для чего ты", "как начать" };
-        string[] thanks = { "спасибо", "благодарю", "thanks", "thank you" };
+        var greetings = new[] { "привет", "здравств", "добрый день", "доброе утро", "добрый вечер", "hello", "hi" };
+        var meta = new[] { "кто ты", "что ты умеешь", "что ты можешь", "помощь", "help", "как пользоваться", "как работать" };
+        var thanks = new[] { "спасибо", "благодарю", "thanks", "thank you" };
 
-        if (greetings.Any(lower.Contains)) return true;
-        if (meta.Any(lower.Contains)) return true;
-        if (thanks.Any(lower.Contains) && lower.Length < 40) return true;
+        if (greetings.Any(lowerText.Contains))
+            return true;
+        if (meta.Any(lowerText.Contains))
+            return true;
+        return thanks.Any(lowerText.Contains) && lowerText.Length < 40;
+    }
 
-        string[] dataKw =
+    private static string BuildChatReply(string lowerText)
+    {
+        if (lowerText.Contains("кто ты", StringComparison.OrdinalIgnoreCase) || lowerText.Contains("что ты умеешь", StringComparison.OrdinalIgnoreCase))
         {
-            "поездк","заказ","выручк","отмен","средн","длительн","расстоян","дистанц","тендер","цен","чек",
-            "покаж","сколько","сравн","выведи","за ","по город","по дн","по месяц","по часам","по недел",
-            "динамик","распределен","топ ","count","sum","avg"
-        };
-        return !dataKw.Any(lower.Contains);
-    }
+            return "Я BI-ассистент Drivee. Помогаю перевести запрос на естественном языке в структурированный intent, затем система кодом строит безопасный SQL, выполняет его и показывает таблицу, график и объяснение.";
+        }
 
-    private static string BuildChatReply(string lower)
-    {
-        if (lower.Contains("кто ты") || lower.Contains("о себе") || lower.Contains("что умеешь") || lower.Contains("что можешь") || lower.Contains("для чего"))
-            return "Я — BI-ассистент Drivee. Помогаю получать данные из базы заказов без SQL: просто задайте вопрос на русском языке. " +
-                   "Я умею считать метрики (заказы, выручка, средний чек, длительность, расстояние, отмены, доля отмен, тендеры), " +
-                   "группировать их по дням / неделям / месяцам / часам / статусам, сравнивать периоды и сохранять отчёты для повторного запуска.\n\n" +
-                   "Попробуйте: «Количество заказов по дням за последние 30 дней», «Сравни выручку за этот и прошлый месяц», «Распределение заказов по часам».";
+        if (lowerText.Contains("help", StringComparison.OrdinalIgnoreCase) || lowerText.Contains("помощь", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Спросите, например: «Количество заказов по дням за последние 5 дней», «Выручка по городам за прошлую неделю» или «Топ 3 города по отменённым заказам на этой неделе».";
+        }
 
-        if (lower.Contains("как пользоваться") || lower.Contains("как начать") || lower.Contains("help") || lower.Contains("помощь"))
-            return "Задайте вопрос в поле внизу — например, «Выручка по месяцам». Я покажу: как поняла запрос, итоговый SQL, таблицу и график. " +
-                   "Любой результат можно сохранить как отчёт (кнопка 💾) и позже повторно запустить из боковой панели.";
-
-        if (lower.Contains("спасибо") || lower.Contains("благодар") || lower.Contains("thank"))
-            return "Всегда пожалуйста! Если нужен ещё какой-то срез данных — пишите.";
-
-        return "Привет! Я BI-ассистент Drivee. Задайте вопрос про заказы, выручку или отмены — например: «Количество заказов по дням за последнюю неделю».";
+        return "Сформулируйте вопрос про заказы, выручку, отмены или средний чек, и я разберу его в аналитический intent.";
     }
 }
 
 public static class PromptTemplates
 {
-    public static string SystemPrompt(SemanticLayer s)
+    public static string SystemPrompt(SemanticLayer semanticLayer)
     {
-        var metrics = string.Join(", ", s.Metrics.Select(m => $"{m.Key} ({string.Join("/", m.Synonyms.Take(2))})"));
-        var dims = string.Join(", ", s.Dimensions.Select(d => $"{d.Key} ({string.Join("/", d.Synonyms.Take(2))})"));
-        return $@"Ты — BI-ассистент Drivee (база заказов такси). Работаешь в формате многошагового диалога: учитывай предыдущие сообщения как контекст. ВСЕГДА возвращай СТРОГО один JSON-объект без пояснений, без ```, без текста до/после.
+        var metrics = string.Join(", ", semanticLayer.Metrics.Select(metric => $"{metric.Key} [{string.Join(", ", metric.Synonyms.Take(4))}]"));
+        var dimensions = string.Join(", ", semanticLayer.Dimensions.Select(dimension => $"{dimension.Key} [{string.Join(", ", dimension.Synonyms.Take(3))}]"));
+        var filters = string.Join(", ", semanticLayer.Filters.Select(filter => $"{filter.Key} [{string.Join(", ", filter.Synonyms.Take(3))}]"));
+        return $@"Ты — NL parser для BI-сервиса Drivee. Твоя задача: извлечь смысл пользовательского запроса и вернуть только JSON intent.
 
-Сначала определи kind:
-- ""query"" — пользователь хочет получить данные (метрика, группировка, период, фильтр, сравнение). Это может быть ПЕРВЫЙ запрос ИЛИ УТОЧНЕНИЕ предыдущего (в последнем случае возьми недостающие поля из предыдущего intent в истории и дополни новыми).
-- ""chat"" — приветствие, благодарность, вопрос о возможностях бота, small talk. НЕ пытайся искать метрику. Заполни reply дружелюбным ответом на русском (2-4 предложения).
-- ""clarify"" — запрос похож на аналитический, но чего-то не хватает (нет метрики/периода/группировки) И в истории нет достаточного контекста. Заполни reply уточняющим вопросом.
+ВАЖНО:
+- НИКОГДА не пиши финальный SQL.
+- НИКОГДА не придумывай таблицы или поля вне перечисленного semantic layer.
+- Возвращай только один JSON-объект без markdown, без комментариев, без текста до и после.
+- Если запрос не аналитический — верни kind=""chat"".
+- Если данных для безопасного SQL недостаточно — верни kind=""clarify"" и короткое clarification/reply.
 
-Схема:
+Доступные метрики:
+{metrics}
+
+Доступные dimensions:
+{dimensions}
+
+Доступные filters:
+{filters}
+
+Разрешённая схема:
 {{
   ""kind"": ""query"" | ""chat"" | ""clarify"",
-  ""reply"": null | string,
-  ""intent"": ""aggregate"" | ""compare_periods"",
-  ""metric"": одно из [{metrics}],
-  ""group_by"": null | одно из [{dims}],
-  ""period"": null | ""today"" | ""yesterday"" | ""last_week"" | ""current_week"" | ""last_month"" | ""current_month"" | ""current_year"" | ""previous_year"" | ""last_7_days"" | ""last_30_days"" | ""last_N_days"",
-  ""periods"": null | массив из двух периодов (для intent=compare_periods),
-  ""filters"": null | {{""city"":""..."", ""status"":""...""}},
-  ""visualization_hint"": ""bar"" | ""line"" | ""pie"" | ""table"",
-  ""confidence"": 0.0..1.0,
-  ""explanation"": null | короткое пояснение на русском, как ты понял запрос (для kind=query)
+  ""reply"": string | null,
+  ""clarification"": string | null,
+  ""intent"": ""metric_query"" | ""compare_periods"",
+  ""metric"": string | null,
+  ""aggregation"": ""count"" | ""sum"" | ""avg"" | ""formula"" | null,
+  ""dimensions"": [""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order""],
+  ""filters"": [
+    {{
+      ""field"": string,
+      ""operator"": ""="" | ""!="" | ""in"" | ""not_in"" | "">"" | "">="" | ""<"" | ""<="",
+      ""value"": string | number | [string]
+    }}
+  ],
+  ""date_range"": {{
+    ""type"": ""today"" | ""yesterday"" | ""last_n_days"" | ""last_n_weeks"" | ""last_n_months"" | ""current_week"" | ""previous_week"" | ""current_month"" | ""previous_month"" | ""current_year"" | ""previous_year"" | ""absolute"",
+    ""value"": number | null,
+    ""start"": ""YYYY-MM-DD"" | null,
+    ""end"": ""YYYY-MM-DD"" | null,
+    ""date_column"": ""order_timestamp"" | null
+  }} | null,
+  ""sort"": [
+    {{
+      ""field"": ""metric"" | ""period"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order"",
+      ""direction"": ""asc"" | ""desc""
+    }}
+  ],
+  ""limit"": number | null,
+  ""source"": ""orders"" | null,
+  ""comparison"": {{
+    ""mode"": ""period_vs_period"",
+    ""periods"": [{{ ""type"": ""..."", ""start"": ""..."", ""end"": ""..."" }}, {{ ""type"": ""..."", ""start"": ""..."", ""end"": ""..."" }}]
+  }} | null,
+  ""confidence"": number,
+  ""explanation"": string | null
 }}
 
-Правила:
-- Если в истории уже есть query-intent и пользователь пишет уточнение типа «а теперь по городам», «за последний месяц», «сравни с прошлым годом» — это kind=query, скопируй metric/group_by/period из предыдущего intent и перезапиши только то, что уточнил пользователь. confidence должен быть высоким (≥0.8).
-- Если kind=chat или clarify — поля metric/period и прочие можно оставить дефолтами. confidence = 1.0 для chat, 0.3 для clarify.
-- Временной ряд (day/week/month) → visualization_hint=line. Сравнение категорий (hour/status) → bar. Без группировки → table.
-- confidence для query: 0.9 если распознаны и метрика, и период, и группировка; 0.7 если двое из трёх; 0.5 если только метрика; ниже 0.4 — если что-то очень неуверенно распознано.";
+Дополнительные правила:
+- Для ""завершённых заказов"" используй metric=""orders_count"" и filter status_order = done.
+- Для ""отменённых заказов"" используй metric=""orders_count"" и filter status_order = cancelled.
+- Для временного ряда используй visualization = line.
+- Для top N обычно нужен limit и sort по metric desc.
+- Для compare_periods можно заполнить periods или comparison.periods.
+- Если не уверен — лучше верни kind=""clarify"", чем рискованный query intent.";
     }
 }

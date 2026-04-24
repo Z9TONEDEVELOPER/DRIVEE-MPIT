@@ -1,0 +1,101 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = AppRoles.Admin)]
+@rendermode InteractiveServer
+@inject UserService Users
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Drivee BI · Users</PageTitle>
+
+<div class="bi-workspace">
+    <aside class="bi-sidebar">
+        <div class="bi-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-sub">NL → SQL аналитика</div>
+            </div>
+        </div>
+
+        <div class="bi-user-card">
+            <div class="bi-user-label">Сеанс</div>
+            <div class="bi-user-name">@_displayName</div>
+            <div class="bi-user-meta">@_username · Администратор</div>
+            <form method="post" action="/auth/logout">
+                <button type="submit" class="bi-logout-btn">Выйти</button>
+            </form>
+        </div>
+
+        <nav class="bi-nav">
+            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
+            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
+            <a class="bi-nav-link active" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
+        </nav>
+    </aside>
+
+    <main class="bi-chat-main">
+        <header class="bi-chat-header">
+            <div>
+                <h1>Пользователи компании</h1>
+                <div class="bi-tagline">Список всех учётных записей, их ролей и активности внутри внутреннего BI-сервиса.</div>
+            </div>
+        </header>
+
+        <div class="bi-reports-body">
+            <div class="bi-card bi-card-table">
+                <table class="bi-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Пользователь</th>
+                            <th>Роль</th>
+                            <th>Отчётов</th>
+                            <th>Последний вход</th>
+                            <th>Создан</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _users)
+                        {
+                            <tr>
+                                <td>@item.Id</td>
+                                <td>
+                                    <div class="admin-user-name">@item.DisplayName</div>
+                                    <div class="admin-user-sub">@item.Username</div>
+                                </td>
+                                <td><span class="admin-role @(item.Role == AppRoles.Admin ? "admin" : "user")">@item.Role</span></td>
+                                <td>@item.ReportCount</td>
+                                <td>@FormatDate(item.LastLoginAt)</td>
+                                <td>@item.CreatedAt.ToLocalTime().ToString("g")</td>
+                                <td>
+                                    <button class="bi-btn" @onclick="() => OpenUser(item.Id)">Открыть</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+@code {
+    private List<AppUserSummary> _users = new();
+    private string _username = "";
+    private string _displayName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = Users.ListUsers();
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _username = authState.User.GetUsername();
+        _displayName = authState.User.GetDisplayName();
+    }
+
+    private void OpenUser(int id) => Navigation.NavigateTo($"/admin/users/{id}");
+
+    private static string FormatDate(DateTime? value) =>
+        value?.ToLocalTime().ToString("g") ?? "—";
+}

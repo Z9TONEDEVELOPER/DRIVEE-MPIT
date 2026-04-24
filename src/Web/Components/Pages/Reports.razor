@@ -1,9 +1,10 @@
 @page "/reports"
+@attribute [Authorize]
 @rendermode InteractiveServer
-@using DriveeDataSpace.Web.Models
-@using Microsoft.AspNetCore.Components
-@inject DriveeDataSpace.Web.Services.ReportService ReportsSvc
+@using global::DriveeDataSpace.Web.Models
+@inject global::DriveeDataSpace.Web.Services.ReportService ReportsSvc
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Drivee BI · Отчёты</PageTitle>
 
@@ -17,12 +18,25 @@
             </div>
         </div>
 
+        <div class="bi-user-card">
+            <div class="bi-user-label">Сеанс</div>
+            <div class="bi-user-name">@_displayName</div>
+            <div class="bi-user-meta">@_username · @(_isAdmin ? "Администратор" : "Пользователь")</div>
+            <form method="post" action="/auth/logout">
+                <button type="submit" class="bi-logout-btn">Выйти</button>
+            </form>
+        </div>
+
         <nav class="bi-nav">
-            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◈</span> Workspace</a>
+            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
             <a class="bi-nav-link active" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
+            @if (_isAdmin)
+            {
+                <a class="bi-nav-link" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
+            }
         </nav>
 
-        <div class="bi-section-title">Все отчёты</div>
+        <div class="bi-section-title">Мои отчёты</div>
         <div class="bi-reports-list">
             @if (_items.Count == 0)
             {
@@ -30,10 +44,10 @@
             }
             else
             {
-                @foreach (var r in _items)
+                @foreach (var report in _items.Take(8))
                 {
                     <div class="bi-report-item">
-                        <button class="bi-report-link" @onclick="() => Open(r.Id)" title="@r.UserQuery">@r.Name</button>
+                        <button class="bi-report-link" @onclick="() => Open(report.Id)" title="@report.UserQuery">@report.Name</button>
                     </div>
                 }
             }
@@ -44,7 +58,7 @@
         <header class="bi-chat-header">
             <div>
                 <h1>Сохранённые отчёты</h1>
-                <div class="bi-tagline">Исходный запрос · интерпретация · SQL · тип визуализации. Повторное открытие заново исполняет запрос.</div>
+                <div class="bi-tagline">Каждый пользователь видит свои отчёты после входа в систему. Администратор дополнительно управляет доступом через раздел пользователей.</div>
             </div>
         </header>
 
@@ -69,18 +83,18 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var r in _items)
+                            @foreach (var report in _items)
                             {
                                 <tr>
-                                    <td>@r.Id</td>
-                                    <td>@r.Name</td>
-                                    <td class="bi-muted">@r.UserQuery</td>
-                                    <td>@r.Visualization</td>
-                                    <td>@r.Author</td>
-                                    <td>@r.CreatedAt.ToLocalTime().ToString("g")</td>
+                                    <td>@report.Id</td>
+                                    <td>@report.Name</td>
+                                    <td class="bi-muted">@report.UserQuery</td>
+                                    <td>@report.Visualization</td>
+                                    <td>@report.Author</td>
+                                    <td>@report.CreatedAt.ToLocalTime().ToString("g")</td>
                                     <td>
-                                        <button class="bi-btn" @onclick="() => Open(r.Id)">Открыть</button>
-                                        <button class="bi-btn ghost" @onclick="() => Del(r.Id)">Удалить</button>
+                                        <button class="bi-btn" @onclick="() => Open(report.Id)">Открыть</button>
+                                        <button class="bi-btn ghost" @onclick="() => Del(report.Id)">Удалить</button>
                                     </td>
                                 </tr>
                             }
@@ -93,13 +107,28 @@
 </div>
 
 @code {
-    private List<DriveeDataSpace.Web.Models.Report> _items = new();
+    private List<Report> _items = new();
+    private string _username = "";
+    private string _displayName = "";
+    private bool _isAdmin;
 
-    protected override void OnInitialized() => Load();
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _username = authState.User.GetUsername();
+        _displayName = authState.User.GetDisplayName();
+        _isAdmin = authState.User.IsAdmin();
 
-    private void Load() => _items = ReportsSvc.List();
+        Load();
+    }
+
+    private void Load() => _items = ReportsSvc.ListForAuthor(_username);
 
     private void Open(int id) => Nav.NavigateTo($"/?report={id}");
 
-    private void Del(int id) { ReportsSvc.Delete(id); Load(); }
+    private void Del(int id)
+    {
+        ReportsSvc.DeleteForAuthor(id, _username, _isAdmin);
+        Load();
+    }
 }

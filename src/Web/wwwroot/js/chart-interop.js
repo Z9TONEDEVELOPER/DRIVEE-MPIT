@@ -64,6 +64,7 @@ window.driveeCharts = (function () {
                 borderRadius: type === 'bar' ? 4 : 0,
                 pointRadius: type === 'line' ? 3 : 0,
                 pointHoverRadius: 5,
+                pointHitRadius: type === 'line' ? 14 : 0,
                 tension: 0.3,
                 fill: type === 'line' ? { target: 'origin', above: 'rgba(79,70,229,0.08)' } : true
             }]
@@ -143,7 +144,14 @@ window.driveeCharts = (function () {
                 responsive: true,
                 maintainAspectRatio: false,
                 layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
-                interaction: { mode: 'index', intersect: false },
+                interaction: {
+                    mode: 'nearest',
+                    intersect: true
+                },
+                hover: {
+                    mode: 'nearest',
+                    intersect: true
+                },
                 plugins: plugins,
                 scales: type === 'pie' ? {} : { x: xAxis, y: yAxis }
             }

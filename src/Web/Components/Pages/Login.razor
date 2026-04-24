@@ -1,0 +1,54 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Components
+
+<PageTitle>Drivee BI · Sign In</PageTitle>
+
+<div class="auth-shell">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="auth-title">Drivee BI</div>
+                <div class="auth-subtitle">Вход для корпоративного использования</div>
+            </div>
+        </div>
+
+        <h1>Войдите в рабочее пространство</h1>
+        <p class="auth-copy">Доступ к отчётам, NL→SQL аналитике и сохранённым данным доступен только после аутентификации.</p>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="auth-error">@Error</div>
+        }
+
+        <form method="post" action="/auth/login" class="auth-form">
+            <input type="hidden" name="returnUrl" value="@NormalizedReturnUrl" />
+
+            <label class="auth-label" for="username">Логин</label>
+            <input id="username" name="username" class="auth-input" autocomplete="username" autofocus />
+
+            <label class="auth-label" for="password">Пароль</label>
+            <input id="password" name="password" type="password" class="auth-input" autocomplete="current-password" />
+
+            <button type="submit" class="auth-submit">Войти</button>
+        </form>
+
+        <div class="auth-footnote">
+            Если вы не знаете свои учётные данные, обратитесь к корпоративному администратору.
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private string NormalizedReturnUrl =>
+        !string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith("/", StringComparison.Ordinal) && !ReturnUrl.StartsWith("//", StringComparison.Ordinal)
+            ? ReturnUrl
+            : "/";
+}

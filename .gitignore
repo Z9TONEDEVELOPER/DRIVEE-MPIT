@@ -309,3 +309,13 @@ node_modules/
 npm-debug.log*
 
 .claude/**
+
+# === Стандартные папки сборки ===
+**/[Bb]in/
+**/[Oo]bj/
+
+# === Варианты имён (AI-агенты, кастомные билды, preview SDK) ===
+**/*[Bb]in*/
+**/*[Oo]bj*/
+*-codex*/
+*-rework*/

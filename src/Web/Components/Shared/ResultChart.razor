@@ -1,4 +1,4 @@
-@using DriveeDataSpace.Web.Models
+@using global::DriveeDataSpace.Web.Models
 @using Microsoft.AspNetCore.Components
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
@@ -20,16 +20,37 @@
 </div>
 
 @code {
-    [Parameter] public DriveeDataSpace.Web.Models.QueryResult? Result { get; set; }
+    [Parameter] public global::DriveeDataSpace.Web.Models.QueryResult? Result { get; set; }
     [Parameter] public string Type { get; set; } = "bar";
     [Parameter] public string Title { get; set; } = "";
 
     private ElementReference _canvas;
     private string _chartId = "chart-" + Guid.NewGuid().ToString("N");
+    private QueryResult? _lastRenderedResult;
+    private string? _lastRenderedType;
+    private string? _lastRenderedTitle;
+    private bool _shouldRenderChart = true;
+
+    protected override void OnParametersSet()
+    {
+        _shouldRenderChart =
+            !ReferenceEquals(_lastRenderedResult, Result) ||
+            !string.Equals(_lastRenderedType, Type, StringComparison.Ordinal) ||
+            !string.Equals(_lastRenderedTitle, Title, StringComparison.Ordinal);
+    }
+
+    protected override bool ShouldRender() => _shouldRenderChart;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (Result == null || Result.Columns.Count < 1 || Result.Rows.Count == 0) return;
+        if (Result == null || Result.Columns.Count < 1 || Result.Rows.Count == 0)
+        {
+            _lastRenderedResult = Result;
+            _lastRenderedType = Type;
+            _lastRenderedTitle = Title;
+            _shouldRenderChart = false;
+            return;
+        }
 
         string[] labels;
         double[] values;
@@ -50,6 +71,13 @@
             await JS.InvokeVoidAsync("driveeCharts.render", _chartId, Type, labels, values, Title);
         }
         catch (JSException) { }
+        finally
+        {
+            _lastRenderedResult = Result;
+            _lastRenderedType = Type;
+            _lastRenderedTitle = Title;
+            _shouldRenderChart = false;
+        }
     }
 
     private async Task ResetZoom()

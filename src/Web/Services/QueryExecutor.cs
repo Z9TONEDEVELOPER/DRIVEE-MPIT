@@ -9,56 +9,61 @@ namespace DriveeDataSpace.Web.Services;
 public class QueryExecutor
 {
     private readonly string _dbPath;
-    private readonly int _timeoutSec;
+    private readonly int _timeoutSeconds;
     private readonly int _maxRows;
+    private readonly SqlGuard _sqlGuard;
 
-    public QueryExecutor(IConfiguration config, IHostEnvironment environment)
+    public QueryExecutor(IConfiguration configuration, IHostEnvironment environment, SqlGuard sqlGuard)
     {
-        _dbPath = DataPathResolver.Resolve(environment, config["Data:AnalyticsDb"], "Data/drivee.db");
-        _timeoutSec = int.TryParse(config["Data:CommandTimeoutSeconds"], out var t) ? t : 15;
-        _maxRows = int.TryParse(config["Data:MaxRows"], out var m) ? m : 10000;
+        _dbPath = DataPathResolver.Resolve(environment, configuration["Data:AnalyticsDb"], "Data/drivee.db");
+        _timeoutSeconds = int.TryParse(configuration["Data:CommandTimeoutSeconds"], out var timeoutSeconds) ? timeoutSeconds : 15;
+        _maxRows = int.TryParse(configuration["Data:MaxRows"], out var maxRows) ? maxRows : 10000;
+        _sqlGuard = sqlGuard;
     }
 
-    public QueryResult Execute(string sql, IDictionary<string, object?>? parameters = null)
+    public QueryResult Execute(BuiltSql builtSql, ValidatedIntent intent)
     {
-        var (ok, reason) = SqlGuard.Validate(sql);
-        if (!ok) throw new InvalidOperationException($"Guardrails: {reason}");
+        var guardReport = _sqlGuard.Validate(builtSql.Sql, builtSql.Parameters, intent);
+        if (!guardReport.Ok)
+            throw new InvalidOperationException($"Guardrails: {guardReport.Reason}");
 
-        var csb = new SqliteConnectionStringBuilder
+        var connectionStringBuilder = new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadOnly
         };
 
-        using var conn = new SqliteConnection(csb.ConnectionString);
-        conn.Open();
+        using var connection = new SqliteConnection(connectionStringBuilder.ConnectionString);
+        connection.Open();
 
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.CommandTimeout = _timeoutSec;
+        using var command = connection.CreateCommand();
+        command.CommandText = builtSql.Sql;
+        command.CommandTimeout = _timeoutSeconds;
 
-        if (parameters != null)
-        {
-            foreach (var kv in parameters)
-                cmd.Parameters.AddWithValue(kv.Key, kv.Value ?? DBNull.Value);
-        }
+        foreach (var parameter in builtSql.Parameters)
+            command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
 
-        var sw = Stopwatch.StartNew();
-        using var reader = cmd.ExecuteReader();
+        var stopwatch = Stopwatch.StartNew();
+        using var reader = command.ExecuteReader();
         var result = new QueryResult();
-        for (var i = 0; i < reader.FieldCount; i++)
-            result.Columns.Add(reader.GetName(i));
+
+        for (var index = 0; index < reader.FieldCount; index++)
+            result.Columns.Add(reader.GetName(index));
 
         while (reader.Read())
         {
-            if (result.Rows.Count >= _maxRows) break;
+            if (result.Rows.Count >= _maxRows)
+                break;
+
             var row = new List<object?>(reader.FieldCount);
-            for (var i = 0; i < reader.FieldCount; i++)
-                row.Add(reader.IsDBNull(i) ? null : reader.GetValue(i));
+            for (var index = 0; index < reader.FieldCount; index++)
+                row.Add(reader.IsDBNull(index) ? null : reader.GetValue(index));
+
             result.Rows.Add(row);
         }
-        sw.Stop();
-        result.DurationMs = sw.ElapsedMilliseconds;
+
+        stopwatch.Stop();
+        result.DurationMs = stopwatch.ElapsedMilliseconds;
         return result;
     }
 }
