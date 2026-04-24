@@ -471,9 +471,16 @@ h1:focus {
 .bi-inline-details summary { cursor: pointer; color: #4f46e5; font-size: 12.5px; padding: 6px 0; }
 
 .bi-save-row {
-    display: flex; gap: 8px; align-items: center; margin-top: 12px;
+    display: flex; gap: 10px; align-items: center;
+    padding: 14px 16px;
+    border-top: 1px solid #f1f5f9;
+    background: #fff;
+    box-sizing: border-box;
 }
-.bi-save-row .bi-save-name { max-width: 260px; }
+.bi-save-row .bi-save-name {
+    max-width: 300px;
+    min-height: 40px;
+}
 
 .bi-chat-input-area {
     border-top: 1px solid #e5e7eb; padding: 14px 28px 10px;

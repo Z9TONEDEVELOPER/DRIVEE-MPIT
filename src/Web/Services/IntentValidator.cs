@@ -157,6 +157,13 @@ public class IntentValidator
             canonicalIntent.Dimensions.Add(canonicalIntent.GroupBy);
         }
 
+        if (canonicalIntent.Kind == QueryIntentKinds.Query)
+        {
+            ApplySemanticPresets(canonicalIntent, userQuery);
+
+            canonicalIntent.Metric ??= _semanticLayer.MatchMetricInText(userQuery)?.Key;
+        }
+
         if (!fromStoredIntent && previousIntent != null && LooksLikeRefinement(userQuery, canonicalIntent))
             ApplyPreviousContext(canonicalIntent, previousIntent);
 
@@ -165,8 +172,6 @@ public class IntentValidator
 
         if (canonicalIntent.Kind == QueryIntentKinds.Query)
         {
-            ApplySemanticPresets(canonicalIntent, userQuery);
-
             canonicalIntent.Metric ??= _semanticLayer.MatchMetricInText(userQuery)?.Key;
             if (canonicalIntent.Dimensions.Count == 0)
             {
@@ -506,9 +511,44 @@ public class IntentValidator
 
         if (canonicalIntent.Limit == null)
         {
-            var topMatch = System.Text.RegularExpressions.Regex.Match(text, @"(?:топ|top)\s*(\d{1,3})", RegexOptions.CultureInvariant);
+            var topMatch = System.Text.RegularExpressions.Regex.Match(text, @"(?:топ|top)\s*(\d{1,3})|^(?<leading>\d{1,3})\s+сам", RegexOptions.CultureInvariant);
             if (topMatch.Success && int.TryParse(topMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var topN) && topN > 0)
                 canonicalIntent.Limit = topN;
+            else if (topMatch.Success && int.TryParse(topMatch.Groups["leading"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var leadingTopN) && leadingTopN > 0)
+                canonicalIntent.Limit = leadingTopN;
+        }
+
+        if (text.Contains("продаж", StringComparison.OrdinalIgnoreCase) || text.Contains("sales", StringComparison.OrdinalIgnoreCase))
+        {
+            canonicalIntent.Metric = "revenue_sum";
+            if (!text.Contains("отмен", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("заверш", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("completed", StringComparison.OrdinalIgnoreCase) &&
+                !text.Contains("done", StringComparison.OrdinalIgnoreCase))
+            {
+                canonicalIntent.Filters.RemoveAll(filter => string.Equals(filter.Field, "status_order", StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (IsBareSalesQuery(text))
+            {
+                canonicalIntent.Dimensions.Clear();
+                canonicalIntent.Filters.Clear();
+                canonicalIntent.Sort.Clear();
+                canonicalIntent.Visualization = "table";
+            }
+        }
+
+        if (text.Contains("самых дорог", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("самые дорог", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("дорогих заказ", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("expensive orders", StringComparison.OrdinalIgnoreCase))
+        {
+            canonicalIntent.Metric = "order_price";
+            canonicalIntent.Visualization = "table";
+            if (canonicalIntent.Dimensions.All(dimension => !dimension.Equals("order", StringComparison.OrdinalIgnoreCase)))
+                canonicalIntent.Dimensions.Add("order");
+            if (canonicalIntent.Sort.Count == 0)
+                canonicalIntent.Sort.Add(new QuerySort { Field = "metric", Direction = "desc" });
         }
 
         if (canonicalIntent.Sort.Count == 0)
@@ -564,8 +604,57 @@ public class IntentValidator
             });
         }
 
+        AddNumericFilterFromText(
+            canonicalIntent.Filters,
+            text,
+            "price_order_local",
+            @"(?:сумм\w*|цен\w*|стоимост\w*|чек\w*|руб\w*)\D{0,24}(?<operator>больше|более|выше|дороже|от|>=|>|меньше|менее|ниже|дешевле|до|<=|<)\D{0,12}(?<value>\d+(?:[\s\u00A0]\d{3})*(?:[,.]\d+)?)");
+
         if (text.Contains("pie", StringComparison.OrdinalIgnoreCase) || text.Contains("круг", StringComparison.OrdinalIgnoreCase))
             canonicalIntent.Visualization ??= "pie";
+    }
+
+    private static bool IsBareSalesQuery(string text)
+    {
+        var normalized = Regex.Replace(text, @"[^\p{L}\p{N}\s]+", " ", RegexOptions.CultureInvariant);
+        normalized = Regex.Replace(normalized, @"\s+", " ", RegexOptions.CultureInvariant).Trim();
+
+        return normalized is "продажи" or "покажи продажи" or "показать продажи" or "продажы" or "sales" or "show sales";
+    }
+
+    private static void AddNumericFilterFromText(
+        List<IntentFilter> filters,
+        string text,
+        string field,
+        string pattern)
+    {
+        if (filters.Any(filter => string.Equals(filter.Field, field, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return;
+
+        var valueText = match.Groups["value"].Value.Replace(" ", "", StringComparison.Ordinal).Replace("\u00A0", "", StringComparison.Ordinal);
+        if (!decimal.TryParse(valueText.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
+            return;
+
+        var operatorText = match.Groups["operator"].Value;
+        var normalizedOperator = operatorText switch
+        {
+            "больше" or "более" or "выше" or "дороже" or "от" or ">" => ">",
+            ">=" => ">=",
+            "меньше" or "менее" or "ниже" or "дешевле" or "до" or "<" => "<",
+            "<=" => "<=",
+            _ => ">"
+        };
+
+        filters.Add(new IntentFilter
+        {
+            Field = field,
+            Operator = normalizedOperator,
+            Value = value
+        });
     }
 
     private static List<string> InferLegacyComparisonPeriods(string text)

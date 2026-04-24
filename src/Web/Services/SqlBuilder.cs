@@ -124,6 +124,7 @@ public class SqlBuilder
         "count" => $"COUNT({metric.Expression})",
         "sum" => $"ROUND(SUM({metric.Expression}), 2)",
         "avg" => $"ROUND(AVG({metric.Expression}), 2)",
+        "max" => $"ROUND(MAX({metric.Expression}), 2)",
         "formula" => metric.Expression,
         _ => throw new InvalidOperationException($"Unsupported aggregation: {metric.Aggregation}")
     };

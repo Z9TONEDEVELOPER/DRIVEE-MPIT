@@ -207,8 +207,14 @@ public class LlmService
             Confidence = 0.45
         };
 
-        if (lower.Contains("выруч", StringComparison.Ordinal) || lower.Contains("revenue", StringComparison.Ordinal))
+        if (lower.Contains("выруч", StringComparison.Ordinal) || lower.Contains("revenue", StringComparison.Ordinal) || lower.Contains("продаж", StringComparison.Ordinal) || lower.Contains("sales", StringComparison.Ordinal))
             intent.Metric = "revenue_sum";
+        else if (lower.Contains("самых дорог", StringComparison.Ordinal) || lower.Contains("самые дорог", StringComparison.Ordinal) || lower.Contains("дорогих заказ", StringComparison.Ordinal))
+        {
+            intent.Metric = "order_price";
+            intent.Dimensions.Add("order");
+            intent.Visualization = "table";
+        }
         else if (lower.Contains("средн", StringComparison.Ordinal) && lower.Contains("чек", StringComparison.Ordinal))
             intent.Metric = "avg_order_price";
         else if (lower.Contains("длитель", StringComparison.Ordinal) || lower.Contains("duration", StringComparison.Ordinal))
@@ -267,10 +273,17 @@ public class LlmService
             intent.DateRange = dateRange;
         }
 
-        var topMatch = Regex.Match(lower, @"(?:топ|top)\s*(\d{1,3})", RegexOptions.CultureInvariant);
-        if (topMatch.Success && int.TryParse(topMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var topN))
+        AddPriceFilterFromText(intent, lower);
+
+        var topMatch = Regex.Match(lower, @"(?:топ|top)\s*(\d{1,3})|^(?<leading>\d{1,3})\s+сам", RegexOptions.CultureInvariant);
+        var topValue = topMatch.Success && int.TryParse(topMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var topN)
+            ? topN
+            : topMatch.Success && int.TryParse(topMatch.Groups["leading"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var leadingTopN)
+                ? leadingTopN
+                : (int?)null;
+        if (topValue.HasValue)
         {
-            intent.Limit = topN;
+            intent.Limit = topValue.Value;
             intent.Sort.Add(new QuerySort
             {
                 Field = intent.Metric ?? "metric",
@@ -299,6 +312,7 @@ public class LlmService
         intent.Aggregation = intent.Metric switch
         {
             "revenue_sum" => "sum",
+            "order_price" => "max",
             "avg_order_price" or "avg_trip_duration" or "avg_distance_km" or "tenders_per_order" => "avg",
             "cancellation_rate" => "formula",
             _ => "count"
@@ -321,6 +335,39 @@ public class LlmService
         intent.Confidence = Math.Min(confidence, 0.9);
         intent.Explanation = BuildExplanation(intent);
         return intent;
+    }
+
+    private static void AddPriceFilterFromText(QueryIntent intent, string text)
+    {
+        if (intent.Filters.Any(filter => string.Equals(filter.Field, "price_order_local", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var match = Regex.Match(
+            text,
+            @"(?:сумм\w*|цен\w*|стоимост\w*|чек\w*|руб\w*)\D{0,24}(?<operator>больше|более|выше|дороже|от|>=|>|меньше|менее|ниже|дешевле|до|<=|<)\D{0,12}(?<value>\d+(?:[\s\u00A0]\d{3})*(?:[,.]\d+)?)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return;
+
+        var valueText = match.Groups["value"].Value.Replace(" ", "", StringComparison.Ordinal).Replace("\u00A0", "", StringComparison.Ordinal);
+        if (!decimal.TryParse(valueText.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
+            return;
+
+        var normalizedOperator = match.Groups["operator"].Value switch
+        {
+            "больше" or "более" or "выше" or "дороже" or "от" or ">" => ">",
+            ">=" => ">=",
+            "меньше" or "менее" or "ниже" or "дешевле" or "до" or "<" => "<",
+            "<=" => "<=",
+            _ => ">"
+        };
+
+        intent.Filters.Add(new IntentFilter
+        {
+            Field = "price_order_local",
+            Operator = normalizedOperator,
+            Value = value
+        });
     }
 
     private static bool TryExtractLegacyComparisonPeriods(string text, out List<string>? periods)
@@ -539,8 +586,8 @@ public static class PromptTemplates
   ""clarification"": string | null,
   ""intent"": ""metric_query"" | ""compare_periods"",
   ""metric"": string | null,
-  ""aggregation"": ""count"" | ""sum"" | ""avg"" | ""formula"" | null,
-  ""dimensions"": [""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order""],
+  ""aggregation"": ""count"" | ""sum"" | ""avg"" | ""max"" | ""formula"" | null,
+  ""dimensions"": [""order"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order""],
   ""filters"": [
     {{
       ""field"": string,
@@ -557,7 +604,7 @@ public static class PromptTemplates
   }} | null,
   ""sort"": [
     {{
-      ""field"": ""metric"" | ""period"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order"",
+      ""field"": ""metric"" | ""period"" | ""order"" | ""day"" | ""week"" | ""month"" | ""hour"" | ""weekday"" | ""city"" | ""status_order"",
       ""direction"": ""asc"" | ""desc""
     }}
   ],
@@ -574,6 +621,9 @@ public static class PromptTemplates
 Дополнительные правила:
 - Для ""завершённых заказов"" используй metric=""orders_count"" и filter status_order = done.
 - Для ""отменённых заказов"" используй metric=""orders_count"" и filter status_order = cancelled.
+- Для ""продажи"" используй metric=""revenue_sum"".
+- Для ""самые дорогие заказы"" используй metric=""order_price"", dimension=""order"", sort metric desc и limit из запроса.
+- Для условий суммы/цены заказа используй filter price_order_local с оператором >, >=, < или <=.
 - Для временного ряда используй visualization = line.
 - Для top N обычно нужен limit и sort по metric desc.
 - Для compare_periods можно заполнить periods или comparison.periods.

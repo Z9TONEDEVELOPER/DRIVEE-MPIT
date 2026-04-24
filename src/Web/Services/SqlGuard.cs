@@ -18,7 +18,7 @@ public class SqlGuard
     private static readonly HashSet<string> SqlKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "select", "from", "where", "group", "by", "order", "limit", "as", "and", "or", "in", "not", "null",
-        "union", "all", "case", "when", "then", "else", "end", "round", "count", "sum", "avg", "cast", "strftime",
+        "union", "all", "case", "when", "then", "else", "end", "round", "count", "sum", "avg", "max", "cast", "strftime",
         "date", "integer", "asc", "desc", "nullif", "on"
     };
 

@@ -665,17 +665,6 @@
             }
             builder.CloseElement();
 
-            if (m.Visualization != "table")
-            {
-                builder.OpenElement(seq++, "details");
-                builder.AddAttribute(seq++, "class", "bi-inline-details");
-                builder.OpenElement(seq++, "summary");
-                builder.AddContent(seq++, "Показать таблицу");
-                builder.CloseElement();
-                builder.AddContent(seq++, RenderTable(pr.Result));
-                builder.CloseElement();
-            }
-
             // Save row
             builder.OpenElement(seq++, "div");
             builder.AddAttribute(seq++, "class", "bi-save-row");
@@ -692,14 +681,14 @@
                 builder.OpenElement(seq++, "button");
                 builder.AddAttribute(seq++, "class", "bi-save-btn");
                 builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => SaveReport(m)));
-                builder.AddContent(seq++, "💾 Сохранить отчёт");
+                builder.AddContent(seq++, "Сохранить отчёт");
                 builder.CloseElement();
             }
             else
             {
                 builder.OpenElement(seq++, "span");
                 builder.AddAttribute(seq++, "class", "bi-save-msg");
-                builder.AddContent(seq++, $"✓ Сохранено как {m.SavedAs}");
+                builder.AddContent(seq++, $"Сохранено как {m.SavedAs}");
                 builder.CloseElement();
             }
             builder.CloseElement();

@@ -84,6 +84,7 @@ public class SemanticLayer
 
         var commonDimensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
+            "order",
             "day",
             "week",
             "month",
@@ -134,7 +135,24 @@ public class SemanticLayer
                 },
                 new[]
                 {
-                    "revenue_sum", "revenue", "выручка", "доход", "gmv"
+                    "revenue_sum", "revenue", "выручка", "доход", "gmv", "продажи", "продаж", "sales"
+                }),
+            new(
+                "order_price",
+                "Стоимость заказа",
+                "max",
+                "price_order_local",
+                OrdersSource,
+                DefaultDateColumn,
+                commonDimensions,
+                commonFilters,
+                new[]
+                {
+                    new IntentFilter { Field = "status_order", Operator = "=", Value = "done" }
+                },
+                new[]
+                {
+                    "order_price", "стоимость заказа", "цена заказа", "сумма заказа", "дорогие заказы", "самые дорогие заказы"
                 }),
             new(
                 "avg_order_price",
@@ -219,6 +237,7 @@ public class SemanticLayer
 
         Dimensions = new List<DimensionDefinition>
         {
+            new("order", "по заказам", "order_id", false, OrdersSource, new[] { "order", "order_id", "заказ", "заказам", "по заказам" }),
             new("day", "по дням", "date({date_column})", true, OrdersSource, new[] { "day", "date", "день", "дням", "по дням", "дата" }),
             new("week", "по неделям", "strftime('%Y-W%W', {date_column})", true, OrdersSource, new[] { "week", "неделя", "неделям", "по неделям" }),
             new("month", "по месяцам", "strftime('%Y-%m', {date_column})", true, OrdersSource, new[] { "month", "месяц", "месяцам", "по месяцам" }),

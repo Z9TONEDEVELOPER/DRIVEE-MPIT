@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DriveeDataSpace.Web.Models;
 using Microsoft.Extensions.Logging;
 
@@ -6,6 +7,10 @@ namespace DriveeDataSpace.Web.Services;
 
 public class NlSqlEngine
 {
+    private static readonly Regex WriteIntentPattern = new(
+        @"\b(drop|delete|update|insert|alter|create|truncate|replace|grant|revoke)\b|(?:^|\s)(удали|удалить|удалите|обнови|обновить|обновите|измени|изменить|измените|создай|создать|создайте|добавь|добавить|добавьте|вставь|вставить|вставьте|очисти|очистить|очистите)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private readonly LlmService _llmService;
     private readonly SemanticLayer _semanticLayer;
     private readonly IntentValidator _intentValidator;
@@ -42,6 +47,20 @@ public class NlSqlEngine
 
         try
         {
+            if (RequiresWriteAccess(userQuery))
+            {
+                pipelineResult.IsChat = true;
+                pipelineResult.ChatReply = "Извините, доступ открыт только на чтение";
+                pipelineResult.Confidence = 1.0;
+                pipelineResult.Intent = new QueryIntent
+                {
+                    Kind = QueryIntentKinds.Chat,
+                    Reply = pipelineResult.ChatReply,
+                    Confidence = 1.0
+                };
+                return pipelineResult;
+            }
+
             var rawIntent = await _llmService.InterpretAsync(
                 userQuery,
                 PromptTemplates.SystemPrompt(_semanticLayer),
@@ -106,6 +125,9 @@ public class NlSqlEngine
 
         return pipelineResult;
     }
+
+    private static bool RequiresWriteAccess(string userQuery) =>
+        !string.IsNullOrWhiteSpace(userQuery) && WriteIntentPattern.IsMatch(userQuery);
 
     public PipelineResult ReplayFromReport(string intentJson, CancellationToken cancellationToken = default)
     {
