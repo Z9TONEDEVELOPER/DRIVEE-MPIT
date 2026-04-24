@@ -805,6 +805,13 @@ h1:focus {
     color: #475569;
 }
 
+.admin-email-body {
+    max-width: 420px;
+    white-space: pre-wrap;
+    color: #475569;
+    line-height: 1.45;
+}
+
 .admin-actions-cell {
     min-width: 250px;
 }

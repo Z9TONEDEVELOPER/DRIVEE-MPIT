@@ -157,6 +157,52 @@
                 </table>
             </div>
             </section>
+
+            <section class="admin-section">
+                <div class="admin-section-head">
+                    <div>
+                        <h2>Локальные уведомления</h2>
+                        <div class="bi-tagline">Последние сообщения, которые локально имитируют email-уведомления пользователям.</div>
+                    </div>
+                    <span class="admin-count">@_localEmails.Count писем</span>
+                </div>
+
+                <div class="bi-card bi-card-table">
+                    @if (_localEmails.Count == 0)
+                    {
+                        <div class="bi-empty">Локальных уведомлений пока нет.</div>
+                    }
+                    else
+                    {
+                        <table class="bi-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Получатель</th>
+                                    <th>Тема</th>
+                                    <th>Текст</th>
+                                    <th>Создано</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var email in _localEmails)
+                                {
+                                    <tr>
+                                        <td>@email.Id</td>
+                                        <td>@email.To</td>
+                                        <td>
+                                            <div class="admin-user-name">@email.Subject</div>
+                                            <div class="admin-user-sub">@email.Category</div>
+                                        </td>
+                                        <td class="admin-email-body">@email.Body</td>
+                                        <td>@email.CreatedAt.ToLocalTime().ToString("g")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
         </div>
     </main>
 </div>
@@ -164,6 +210,7 @@
 @code {
     private List<AppUserSummary> _users = new();
     private List<RegistrationRequest> _pendingRequests = new();
+    private List<LocalEmailMessage> _localEmails = new();
     private readonly Dictionary<int, string> _rejectionReasons = new();
     private string _username = "";
     private string _displayName = "";
@@ -200,7 +247,7 @@
             try
             {
                 await Email.SendRegistrationApprovedAsync(result.Request);
-                _notice += " Локальное письмо записано в лог приложения.";
+                _notice += " Локальное уведомление сохранено в outbox.";
             }
             catch (Exception exception)
             {
@@ -235,7 +282,7 @@
             try
             {
                 await Email.SendRegistrationRejectedAsync(result.Request);
-                _notice += " Локальное письмо записано в лог приложения.";
+                _notice += " Локальное уведомление сохранено в outbox.";
             }
             catch (Exception exception)
             {
@@ -258,6 +305,7 @@
     {
         _users = Users.ListUsers();
         _pendingRequests = Users.ListRegistrationRequests(RegistrationRequestStatuses.Pending);
+        _localEmails = Email.ListLocalEmails();
         foreach (var requestId in _rejectionReasons.Keys.Except(_pendingRequests.Select(request => request.Id)).ToList())
             _rejectionReasons.Remove(requestId);
     }
