@@ -32,4 +32,29 @@ public sealed record LlmSettings(
     bool IsGigaChatConfigured,
     DateTime UpdatedAt);
 
-public sealed record UpdateLlmSettingsRequest(string Provider);
+public sealed record UpdateLlmSettingsRequest(
+    string Provider,
+    string? GigaChatAuthorizationKey = null,
+    bool ClearGigaChatAuthorizationKey = false);
+
+public sealed record UpdateUserRoleRequest(string Role);
+
+public sealed record UpdateUserActiveRequest(bool IsActive);
+
+public sealed record SecurityChecklistItem(
+    string Key,
+    string Title,
+    string Status,
+    string Details,
+    bool Passed);
+
+public sealed record SecurityChecklist(IReadOnlyList<SecurityChecklistItem> Items)
+{
+    public int PassedCount => Items.Count(item => item.Passed);
+    public int TotalCount => Items.Count;
+    public bool IsReady => Items.All(item => item.Passed);
+}
+
+public sealed record SecretRotationResult(int RotatedCount, int SkippedCount);
+
+public sealed record RetentionCleanupResult(int DeletedAuditEvents, int DeletedReports);

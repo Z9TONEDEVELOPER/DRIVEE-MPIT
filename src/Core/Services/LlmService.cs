@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -30,12 +31,12 @@ public class LlmService
     private readonly bool _fastHeuristicEnabled;
     private readonly double _fastHeuristicConfidenceThreshold;
     private readonly string _fallbackProvider;
-    private readonly string _gigaChatAuthKey;
     private readonly string _gigaChatScope;
     private readonly string _gigaChatAuthUrl;
     private readonly string _gigaChatBaseUrl;
     private readonly string _gigaChatModel;
     private string? _gigaChatAccessToken;
+    private string? _gigaChatAccessTokenKeyFingerprint;
     private DateTimeOffset _gigaChatTokenExpiresAt;
 
     public LlmService(
@@ -65,7 +66,6 @@ public class LlmService
         _fastHeuristicEnabled = !bool.TryParse(configuration["Llm:FastHeuristicEnabled"], out var fastHeuristicEnabled) || fastHeuristicEnabled;
         _fastHeuristicConfidenceThreshold = ReadBoundedDouble(configuration, "Llm:FastHeuristicConfidenceThreshold", 0.7, 0.5, 0.95);
         _fallbackProvider = LlmProviders.Normalize(configuration["Llm:Fallback:Provider"]);
-        _gigaChatAuthKey = configuration["Llm:Fallback:GigaChat:AuthorizationKey"] ?? "";
         _gigaChatScope = configuration["Llm:Fallback:GigaChat:Scope"] ?? "GIGACHAT_API_PERS";
         _gigaChatAuthUrl = configuration["Llm:Fallback:GigaChat:AuthUrl"] ?? "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
         _gigaChatBaseUrl = (configuration["Llm:Fallback:GigaChat:BaseUrl"] ?? "https://gigachat.devices.sberbank.ru/api/v1").TrimEnd('/');
@@ -154,12 +154,13 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_gigaChatAuthKey))
+        var authorizationKey = _settings.GetGigaChatAuthorizationKey();
+        if (string.IsNullOrWhiteSpace(authorizationKey))
             throw new InvalidOperationException("GigaChat provider is selected, but Llm:Fallback:GigaChat:AuthorizationKey is empty.");
 
         try
         {
-            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, cancellationToken);
+            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, authorizationKey, cancellationToken);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
@@ -174,8 +175,10 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
+        using var llmScope = _metrics.EnterLlmQueue();
         if (!await _localLlmSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
             throw new InvalidOperationException("Local LLM is busy. Try again in a few seconds.");
+        llmScope.MarkActive();
 
         try
         {
@@ -223,15 +226,16 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
+        var authorizationKey = _settings.GetGigaChatAuthorizationKey();
         if (!string.Equals(_fallbackProvider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(_gigaChatAuthKey))
+            string.IsNullOrWhiteSpace(authorizationKey))
         {
             return null;
         }
 
         try
         {
-            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, cancellationToken);
+            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, authorizationKey, cancellationToken);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
@@ -244,14 +248,17 @@ public class LlmService
         string userQuery,
         string systemPrompt,
         IReadOnlyList<ChatTurn>? history,
+        string authorizationKey,
         CancellationToken cancellationToken)
     {
+        using var llmScope = _metrics.EnterLlmQueue();
         if (!await _gigaChatSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
             throw new InvalidOperationException("GigaChat queue is busy. Try again in a few seconds.");
+        llmScope.MarkActive();
 
         try
         {
-            var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
+            var accessToken = await GetGigaChatAccessTokenAsync(authorizationKey, cancellationToken);
             var messages = new List<object> { new { role = "system", content = systemPrompt } };
             if (history != null)
             {
@@ -296,9 +303,11 @@ public class LlmService
         }
     }
 
-    private async Task<string> GetGigaChatAccessTokenAsync(CancellationToken cancellationToken)
+    private async Task<string> GetGigaChatAccessTokenAsync(string authorizationKey, CancellationToken cancellationToken)
     {
+        var keyFingerprint = FingerprintSecret(authorizationKey);
         if (!string.IsNullOrWhiteSpace(_gigaChatAccessToken) &&
+            string.Equals(_gigaChatAccessTokenKeyFingerprint, keyFingerprint, StringComparison.Ordinal) &&
             _gigaChatTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
         {
             return _gigaChatAccessToken;
@@ -311,7 +320,7 @@ public class LlmService
                 ["scope"] = _gigaChatScope
             })
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", _gigaChatAuthKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authorizationKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("RqUID", Guid.NewGuid().ToString());
 
@@ -323,6 +332,7 @@ public class LlmService
         using var document = JsonDocument.Parse(body);
         _gigaChatAccessToken = document.RootElement.GetProperty("access_token").GetString()
             ?? throw new InvalidOperationException("GigaChat OAuth response does not contain access_token.");
+        _gigaChatAccessTokenKeyFingerprint = keyFingerprint;
 
         var expiresAt = document.RootElement.TryGetProperty("expires_at", out var expiresAtElement) && expiresAtElement.TryGetInt64(out var unix)
             ? DateTimeOffset.FromUnixTimeSeconds(unix)
@@ -331,6 +341,9 @@ public class LlmService
 
         return _gigaChatAccessToken;
     }
+
+    private static string FingerprintSecret(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static string ExtractContent(string responseBody)
     {

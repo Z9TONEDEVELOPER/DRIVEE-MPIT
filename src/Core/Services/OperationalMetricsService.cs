@@ -16,6 +16,13 @@ public sealed record OperationalMetricsSnapshot(
     int SqlFailuresLastHour,
     int IntentCacheHitsLastHour,
     int ResultCacheHitsLastHour,
+    int ActiveRequests,
+    int QueuedLlmRequests,
+    int ActiveLlmRequests,
+    int QueuedSqlQueries,
+    int ActiveSqlQueries,
+    int QueuedBackgroundJobs,
+    int ActiveBackgroundJobs,
     double AverageLlmMs,
     double AverageSqlMs,
     double AverageTotalRequestMs,
@@ -37,8 +44,51 @@ public sealed class OperationalMetricsService
 
     private readonly object _sync = new();
     private readonly Queue<OperationalMetricEvent> _events = new();
+    private int _activeRequests;
+    private int _queuedLlmRequests;
+    private int _activeLlmRequests;
+    private int _queuedSqlQueries;
+    private int _activeSqlQueries;
+    private int _queuedBackgroundJobs;
+    private int _activeBackgroundJobs;
 
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+
+    public IDisposable EnterRequest()
+    {
+        Interlocked.Increment(ref _activeRequests);
+        return new CounterScope(() => Interlocked.Decrement(ref _activeRequests));
+    }
+
+    public QueueCounterScope EnterLlmQueue()
+    {
+        Interlocked.Increment(ref _queuedLlmRequests);
+        return new QueueCounterScope(
+            () => Interlocked.Decrement(ref _queuedLlmRequests),
+            () => Interlocked.Increment(ref _activeLlmRequests),
+            () => Interlocked.Decrement(ref _activeLlmRequests));
+    }
+
+    public QueueCounterScope EnterSqlQueue()
+    {
+        Interlocked.Increment(ref _queuedSqlQueries);
+        return new QueueCounterScope(
+            () => Interlocked.Decrement(ref _queuedSqlQueries),
+            () => Interlocked.Increment(ref _activeSqlQueries),
+            () => Interlocked.Decrement(ref _activeSqlQueries));
+    }
+
+    public IDisposable EnterBackgroundQueue()
+    {
+        Interlocked.Increment(ref _queuedBackgroundJobs);
+        return new CounterScope(() => Interlocked.Decrement(ref _queuedBackgroundJobs));
+    }
+
+    public IDisposable EnterBackgroundJob()
+    {
+        Interlocked.Increment(ref _activeBackgroundJobs);
+        return new CounterScope(() => Interlocked.Decrement(ref _activeBackgroundJobs));
+    }
 
     public void RecordQuery(int companyId, string? userKey, bool success, long durationMs) =>
         Add(new OperationalMetricEvent(
@@ -138,6 +188,13 @@ public sealed class OperationalMetricsService
             sqlEvents.Count(item => !item.Success),
             events.Count(item => item.Kind == MetricKinds.IntentCacheHit),
             events.Count(item => item.Kind == MetricKinds.ResultCacheHit),
+            Math.Max(0, Volatile.Read(ref _activeRequests)),
+            Math.Max(0, Volatile.Read(ref _queuedLlmRequests)),
+            Math.Max(0, Volatile.Read(ref _activeLlmRequests)),
+            Math.Max(0, Volatile.Read(ref _queuedSqlQueries)),
+            Math.Max(0, Volatile.Read(ref _activeSqlQueries)),
+            Math.Max(0, Volatile.Read(ref _queuedBackgroundJobs)),
+            Math.Max(0, Volatile.Read(ref _activeBackgroundJobs)),
             AverageDuration(llmEvents),
             AverageDuration(sqlEvents),
             AverageDuration(queryEvents),
@@ -220,5 +277,52 @@ public sealed class OperationalMetricsService
         public const string Sql = "sql";
         public const string IntentCacheHit = "intent_cache_hit";
         public const string ResultCacheHit = "result_cache_hit";
+    }
+
+    private sealed class CounterScope : IDisposable
+    {
+        private readonly Action _onDispose;
+        private int _disposed;
+
+        public CounterScope(Action onDispose) => _onDispose = onDispose;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                _onDispose();
+        }
+    }
+
+    public sealed class QueueCounterScope : IDisposable
+    {
+        private readonly Action _leaveQueue;
+        private readonly Action _enterActive;
+        private readonly Action _leaveActive;
+        private int _state;
+
+        public QueueCounterScope(Action leaveQueue, Action enterActive, Action leaveActive)
+        {
+            _leaveQueue = leaveQueue;
+            _enterActive = enterActive;
+            _leaveActive = leaveActive;
+        }
+
+        public void MarkActive()
+        {
+            if (Interlocked.CompareExchange(ref _state, 1, 0) == 0)
+            {
+                _leaveQueue();
+                _enterActive();
+            }
+        }
+
+        public void Dispose()
+        {
+            var state = Interlocked.Exchange(ref _state, 2);
+            if (state == 0)
+                _leaveQueue();
+            else if (state == 1)
+                _leaveActive();
+        }
     }
 }

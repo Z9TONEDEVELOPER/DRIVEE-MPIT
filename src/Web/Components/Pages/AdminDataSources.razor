@@ -1,5 +1,5 @@
 @page "/admin/data-sources"
-@attribute [Authorize(Roles = AppRoles.Admin)]
+@attribute [Authorize(Roles = AppRoles.AdminAccess)]
 @rendermode InteractiveServer
 @inject DataSourceService DataSources
 @inject LlmSettingsService LlmSettingsService
@@ -70,6 +70,17 @@
                                     }
                                 </select>
                             </label>
+                            <label class="llm-provider-field llm-key-field">
+                                GigaChat AuthorizationKey
+                                <input class="auth-input"
+                                       type="password"
+                                       autocomplete="off"
+                                       placeholder="@(_llmSettings?.IsGigaChatConfigured == true ? "Новый ключ, если нужно заменить" : "Введите ключ")"
+                                       @bind="_gigaChatAuthorizationKey"
+                                       @bind:event="oninput"
+                                       disabled="@_busy" />
+                                <span class="llm-key-hint">Существующий ключ не показывается. При сохранении он шифруется в metadata DB.</span>
+                            </label>
                             <button type="button" class="bi-btn" @onclick="SaveLlmProvider" disabled="@_busy">Сохранить</button>
                         </div>
 
@@ -96,7 +107,7 @@
 
                             @if (string.Equals(_selectedLlmProvider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) && !_llmSettings.IsGigaChatConfigured)
                             {
-                                <div class="admin-error compact">Перед выбором GigaChat добавьте AuthorizationKey через dotnet user-secrets или production secret storage.</div>
+                                <div class="admin-error compact">Перед выбором GigaChat введите AuthorizationKey или добавьте его через dotnet user-secrets / production secret storage.</div>
                             }
                         }
                     </div>
@@ -148,7 +159,10 @@
                             <h2>Подключения</h2>
                             <div class="bi-tagline">Активным может быть только один источник. Встроенный Drivee остаётся fallback-демо.</div>
                         </div>
-                        <button type="button" class="bi-btn" @onclick="NewSource">Новый источник</button>
+                        <div class="datasource-head-actions">
+                            <button type="button" class="bi-btn ghost" @onclick="RotateConnectionSecrets" disabled="@_busy">Ротация encryption</button>
+                            <button type="button" class="bi-btn" @onclick="NewSource">Новый источник</button>
+                        </div>
                     </div>
 
                     <div class="bi-card bi-card-table">
@@ -159,6 +173,7 @@
                                     <th>Источник</th>
                                     <th>Provider</th>
                                     <th>Статус</th>
+                                    <th>Проверка</th>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -173,20 +188,31 @@
                                         </td>
                                         <td>@item.Provider</td>
                                         <td>
-                                            @if (item.IsActive)
-                                            {
-                                                <span class="admin-role admin">active</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="admin-role user">draft</span>
-                                            }
+                                            <span class="datasource-status @DataSourceStatusClass(item)">@DataSourceStatusLabel(item)</span>
+                                        </td>
+                                        <td>
+                                            <div class="datasource-validation">
+                                                <span class="datasource-status @(item.IsVerified ? "verified" : "draft")">
+                                                    @(item.IsVerified ? "проверен" : "не проверен")
+                                                </span>
+                                                <div class="admin-user-sub">@FormatValidationDate(item.LastValidatedAt)</div>
+                                                @if (!string.IsNullOrWhiteSpace(item.LastValidationError))
+                                                {
+                                                    <div class="datasource-error-text">@item.LastValidationError</div>
+                                                }
+                                            </div>
                                         </td>
                                         <td>
                                             <button type="button" class="bi-btn ghost" @onclick="() => Edit(item)">Открыть</button>
                                             @if (!item.IsActive)
                                             {
-                                                <button type="button" class="bi-btn" @onclick="() => Activate(item.Id)">Активировать</button>
+                                                <button type="button"
+                                                        class="bi-btn"
+                                                        title="@ActivateTitle(item)"
+                                                        disabled="@(_busy || !CanActivate(item))"
+                                                        @onclick="() => Activate(item.Id)">
+                                                    Активировать
+                                                </button>
                                             }
                                         </td>
                                     </tr>
@@ -205,6 +231,19 @@
                     </div>
 
                     <div class="bi-card datasource-form" @key="_formKey">
+                        <div class="datasource-wizard">
+                            @foreach (var step in BuildWizardSteps())
+                            {
+                                <div class="datasource-wizard-step @(step.Done ? "done" : step.Current ? "current" : "")">
+                                    <span>@step.Number</span>
+                                    <div>
+                                        <strong>@step.Title</strong>
+                                        <small>@step.Subtitle</small>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
                         @if (_selectedIsBuiltin)
                         {
                             <div class="datasource-readonly-note">
@@ -232,6 +271,24 @@
                             <textarea class="auth-input auth-textarea datasource-connection" @bind="_input.ConnectionString" @bind:event="oninput" disabled="@_selectedIsBuiltin"></textarea>
                         </label>
 
+                        @if (_input.Id.HasValue)
+                        {
+                            <div class="datasource-status-panel">
+                                <div>
+                                    <div class="llm-fact-label">Текущий статус</div>
+                                    <div class="llm-fact-value">@DataSourceStatusLabel(_selectedSource)</div>
+                                </div>
+                                <div>
+                                    <div class="llm-fact-label">Последняя проверка</div>
+                                    <div class="llm-fact-value">@FormatValidationDate(_selectedSource?.LastValidatedAt)</div>
+                                </div>
+                                <div>
+                                    <div class="llm-fact-label">Последняя ошибка</div>
+                                    <div class="llm-fact-sub">@DisplayText(_selectedSource?.LastValidationError)</div>
+                                </div>
+                            </div>
+                        }
+
                         <label class="datasource-check">
                             <input type="checkbox" @bind="_input.MakeActive" disabled="@_selectedIsBuiltin" />
                             Сделать активным после сохранения
@@ -254,6 +311,16 @@
                             <button type="button" class="bi-btn ghost" @onclick="TestSelected" disabled="@(_busy || !_input.Id.HasValue)">Проверить</button>
                             <button type="button" class="bi-btn ghost" @onclick="InspectSelected" disabled="@(_busy || !_input.Id.HasValue)">Анализ схемы</button>
                             <button type="button" class="bi-btn ghost" @onclick="GenerateDraft" disabled="@(_busy || !_input.Id.HasValue)">Сгенерировать draft semantic</button>
+                            @if (_input.Id.HasValue && !_selectedIsActive)
+                            {
+                                <button type="button"
+                                        class="bi-btn"
+                                        disabled="@(_busy || !CanActivate(_selectedSource))"
+                                        title="@ActivateTitle(_selectedSource)"
+                                        @onclick="() => Activate(_input.Id.Value)">
+                                    Активировать
+                                </button>
+                            }
                             @if (_input.Id.HasValue && !_selectedIsBuiltin && !_selectedIsActive)
                             {
                                 <button type="button" class="bi-btn danger" @onclick="DeleteSelected" disabled="@_busy">Удалить</button>
@@ -308,11 +375,13 @@
     private bool _busy;
     private bool _selectedIsBuiltin;
     private bool _selectedIsActive;
+    private CompanyDataSource? _selectedSource;
     private string _formKey = Guid.NewGuid().ToString("N");
     private string? _notice;
     private string? _error;
     private LlmSettings? _llmSettings;
     private string _selectedLlmProvider = LlmProviders.Local;
+    private string _gigaChatAuthorizationKey = "";
     private bool _regressionRunning;
     private AnalyticsRegressionRunResult? _regressionResult;
 
@@ -340,8 +409,11 @@
     {
         RunAdminAction(() =>
         {
-            _llmSettings = LlmSettingsService.SetProvider(_selectedLlmProvider, _companyId);
+            _llmSettings = LlmSettingsService.Save(
+                new UpdateLlmSettingsRequest(_selectedLlmProvider, _gigaChatAuthorizationKey),
+                _companyId);
             _selectedLlmProvider = _llmSettings.Provider;
+            _gigaChatAuthorizationKey = "";
             AuditAdmin("llm_settings.update", "llm_settings", details: _llmSettings.Provider);
             _notice = $"LLM provider сохранён: {_llmSettings.Provider}.";
         });
@@ -385,6 +457,7 @@
         _input = new DataSourceInput { Provider = DataSourceProviders.Sqlite };
         _selectedIsBuiltin = false;
         _selectedIsActive = false;
+        _selectedSource = null;
         _testResult = null;
         _schema = null;
         _notice = null;
@@ -411,6 +484,7 @@
         };
         _selectedIsBuiltin = source.IsBuiltin;
         _selectedIsActive = source.IsActive;
+        _selectedSource = source;
         _testResult = null;
         _schema = string.IsNullOrWhiteSpace(source.SchemaJson)
             ? null
@@ -436,6 +510,7 @@
         };
         _selectedIsBuiltin = false;
         _selectedIsActive = false;
+        _selectedSource = null;
         _testResult = null;
         _notice = "Создана редактируемая копия. Проверьте строку подключения и semantic layer, затем сохраните источник.";
         _error = null;
@@ -488,8 +563,10 @@
 
         RunAdminAction(() =>
         {
-            _testResult = DataSources.Test(id, _companyId);
+            var result = DataSources.Test(id, _companyId);
             Refresh();
+            Edit(_items.First(item => item.Id == id));
+            _testResult = result;
             AuditAdmin("data_source.test", "data_source", id.ToString(), _testResult.Ok, _testResult.Message);
         });
     }
@@ -503,6 +580,8 @@
         {
             _schema = DataSources.InspectSchema(id, _companyId);
             Refresh();
+            if (_items.FirstOrDefault(item => item.Id == id) is { } refreshed)
+                _selectedSource = refreshed;
             AuditAdmin("data_source.inspect_schema", "data_source", id.ToString(), details: $"{_schema.Tables.Count} tables");
             _notice = $"Схема прочитана: {_schema.Tables.Count} таблиц.";
         });
@@ -547,12 +626,84 @@
         });
     }
 
+    private void RotateConnectionSecrets()
+    {
+        RunAdminAction(() =>
+        {
+            var result = DataSources.RotateConnectionSecrets(_companyId);
+            AuditAdmin("data_source.secret.rotate", "data_source", details: $"{result.RotatedCount} rotated, {result.SkippedCount} skipped");
+            _notice = $"Connection string secrets перешифрованы: {result.RotatedCount}; пропущено: {result.SkippedCount}.";
+            Refresh();
+            if (_input.Id is int id && _items.FirstOrDefault(item => item.Id == id) is { } selected)
+                Edit(selected);
+        });
+    }
+
     private void ResetFormKey() => _formKey = Guid.NewGuid().ToString("N");
 
     private static string FormatTableName(SchemaTableInfo table) =>
         string.IsNullOrWhiteSpace(table.SchemaName)
             ? table.Name
             : $"{table.SchemaName}.{table.Name}";
+
+    private IReadOnlyList<WizardStep> BuildWizardSteps()
+    {
+        var hasConnection = !string.IsNullOrWhiteSpace(_input.ConnectionString);
+        var isSaved = _input.Id.HasValue;
+        var isVerified = _selectedSource?.IsVerified == true;
+        var hasSchema = _schema != null || !string.IsNullOrWhiteSpace(_selectedSource?.SchemaJson);
+        var hasSemantic = _selectedIsBuiltin || !string.IsNullOrWhiteSpace(_input.SemanticJson);
+        var isActive = _selectedIsActive;
+        var current = !hasConnection ? 2 : !isSaved || !isVerified ? 3 : !hasSchema ? 4 : !hasSemantic ? 5 : !isActive ? 6 : 6;
+
+        return new[]
+        {
+            new WizardStep(1, "Provider", "выбран тип БД", !string.IsNullOrWhiteSpace(_input.Provider), current == 1),
+            new WizardStep(2, "Connection string", "сохраните подключение", hasConnection && isSaved, current == 2),
+            new WizardStep(3, "Test", "проверка доступа", isVerified, current == 3),
+            new WizardStep(4, "Schema inspect", "таблицы и поля", hasSchema, current == 4),
+            new WizardStep(5, "Semantic layer", "метрики и фильтры", hasSemantic, current == 5),
+            new WizardStep(6, "Activate", "готово для аналитиков", isActive && isVerified, current == 6)
+        };
+    }
+
+    private static bool CanActivate(CompanyDataSource? source) =>
+        source?.IsVerified == true &&
+        (source.IsBuiltin || !string.IsNullOrWhiteSpace(source.SemanticJson));
+
+    private static string ActivateTitle(CompanyDataSource? source)
+    {
+        if (source == null)
+            return "Сначала сохраните источник.";
+        if (!source.IsVerified)
+            return string.IsNullOrWhiteSpace(source.LastValidationError)
+                ? "Сначала запустите проверку подключения."
+                : source.LastValidationError;
+        if (!source.IsBuiltin && string.IsNullOrWhiteSpace(source.SemanticJson))
+            return "Сначала заполните semantic layer.";
+        return "Активировать источник.";
+    }
+
+    private static string DataSourceStatusClass(CompanyDataSource? source) =>
+        source == null ? "draft" : source.Status.Replace("_", "-", StringComparison.Ordinal);
+
+    private static string DataSourceStatusLabel(CompanyDataSource? source) =>
+        source?.Status switch
+        {
+            DataSourceStatuses.Active => "активен",
+            DataSourceStatuses.ActiveNotVerified => "активен, не проверен",
+            DataSourceStatuses.Verified => "проверен",
+            DataSourceStatuses.Error => "ошибка",
+            _ => "draft"
+        };
+
+    private static string FormatValidationDate(DateTime? value) =>
+        value?.ToLocalTime().ToString("g") ?? "—";
+
+    private static string DisplayText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private sealed record WizardStep(int Number, string Title, string Subtitle, bool Done, bool Current);
 
     private void AuditAdmin(string action, string targetType, string? targetId = null, bool success = true, string? details = null) =>
         Audit.Record(_companyId, _adminUserId <= 0 ? null : _adminUserId, _username, action, targetType, targetId, success, details);

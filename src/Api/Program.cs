@@ -10,6 +10,7 @@ builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<AuditLogService>();
 builder.Services.AddSingleton<OperationalMetricsService>();
 builder.Services.AddSingleton<QueryLoadControl>();
+builder.Services.AddSingleton<LoginRateLimitService>();
 builder.Services.AddSingleton<LoadCacheService>();
 builder.Services.AddSingleton<AnalyticsRegressionService>();
 builder.Services.AddSingleton<DataSourceService>();
@@ -23,19 +24,26 @@ builder.Services.AddSingleton<SqlGuard>();
 builder.Services.AddSingleton<QueryExecutor>();
 builder.Services.AddSingleton<ExplainEngine>();
 builder.Services.AddSingleton<LlmSettingsService>();
+builder.Services.AddSingleton<SecurityChecklistService>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<EmailService>();
 builder.Services.AddSingleton<AuthTokenService>();
 builder.Services.AddScoped<NlSqlEngine>();
 builder.Services.AddSingleton<ReportService>();
+builder.Services.AddSingleton<RetentionService>();
+builder.Services.AddSingleton<ProductionMetadataGuardService>();
+builder.Services.AddSingleton<BackgroundQueryService>();
 
 var app = builder.Build();
 
+app.Services.GetRequiredService<ProductionMetadataGuardService>().EnsureProductionReady();
 _ = app.Services.GetRequiredService<DataSourceService>();
 app.Services.GetRequiredService<DatasetSeeder>().EnsureSeeded();
 _ = app.Services.GetRequiredService<ReportService>();
 _ = app.Services.GetRequiredService<UserService>();
+_ = app.Services.GetRequiredService<BackgroundQueryService>();
+app.Services.GetRequiredService<RetentionService>().Apply(CompanyDefaults.DefaultCompanyId);
 
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
@@ -48,8 +56,14 @@ app.MapGet("/health", () => Results.Ok(new
     service = "DriveeDataSpace.Api"
 }));
 
-app.MapPost("/api/auth/login", (LoginRequest request, UserService users, AuthTokenService tokens, AuditLogService audit) =>
+app.MapPost("/api/auth/login", (LoginRequest request, HttpContext context, UserService users, AuthTokenService tokens, LoginRateLimitService loginRateLimit, AuditLogService audit) =>
 {
+    if (!loginRateLimit.TryAcquire(request.Username, context.Connection.RemoteIpAddress?.ToString(), out var retryAfter))
+    {
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, request.Username, "auth.login.rate_limited", "user", success: false, details: BuildRetryAfterMessage(retryAfter));
+        return Results.Json(new { error = BuildRetryAfterMessage(retryAfter) }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
     var user = users.Authenticate(request.Username, request.Password);
     if (user == null)
     {
@@ -94,6 +108,82 @@ app.MapGet("/api/admin/users", (HttpContext context, AuthTokenService tokens, Us
     return Results.Ok(users.ListUsers(session.CompanyId));
 });
 
+app.MapGet("/api/admin/company", (HttpContext context, AuthTokenService tokens, UserService users) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    return Results.Ok(users.GetCompany(session.CompanyId));
+});
+
+app.MapPost("/api/admin/company", (UpdateCompanyRequest request, HttpContext context, AuthTokenService tokens, UserService users, AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    try
+    {
+        var company = users.UpdateCompany(session.CompanyId, request.Name);
+        audit.Record(session.CompanyId, session.Id, session.Username, "company.update", "company", session.CompanyId.ToString(), success: true, details: company.Name);
+        return Results.Ok(company);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(session.CompanyId, session.Id, session.Username, "company.update", "company", session.CompanyId.ToString(), success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
+app.MapPost("/api/admin/users/{id:int}/role", (int id, UpdateUserRoleRequest request, HttpContext context, AuthTokenService tokens, UserService users, AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    try
+    {
+        var user = users.UpdateUserRole(session.CompanyId, id, request.Role);
+        audit.Record(session.CompanyId, session.Id, session.Username, "user.role.update", "user", id.ToString(), success: true, details: user.Role);
+        return Results.Ok(user);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(session.CompanyId, session.Id, session.Username, "user.role.update", "user", id.ToString(), success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
+app.MapPost("/api/admin/users/{id:int}/active", (int id, UpdateUserActiveRequest request, HttpContext context, AuthTokenService tokens, UserService users, AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+    if (session.Id == id && !request.IsActive)
+        return Results.BadRequest(new { error = "Нельзя отключить текущий сеанс администратора." });
+
+    try
+    {
+        var user = users.SetUserActive(session.CompanyId, id, request.IsActive);
+        audit.Record(session.CompanyId, session.Id, session.Username, request.IsActive ? "user.activate" : "user.deactivate", "user", id.ToString(), success: true);
+        return Results.Ok(user);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(session.CompanyId, session.Id, session.Username, request.IsActive ? "user.activate" : "user.deactivate", "user", id.ToString(), success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
 app.MapGet("/api/admin/registration-requests", (string? status, HttpContext context, AuthTokenService tokens, UserService users) =>
 {
     var session = GetCurrentSession(context, tokens);
@@ -116,6 +206,17 @@ app.MapGet("/api/admin/llm-settings", (HttpContext context, AuthTokenService tok
     return Results.Ok(settings.Get(session.CompanyId));
 });
 
+app.MapGet("/api/admin/security-checklist", (HttpContext context, AuthTokenService tokens, SecurityChecklistService checklist) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    return Results.Ok(checklist.Get(session.CompanyId));
+});
+
 app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpContext context, AuthTokenService tokens, LlmSettingsService settings, AuditLogService audit) =>
 {
     var session = GetCurrentSession(context, tokens);
@@ -126,13 +227,34 @@ app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpCo
 
     try
     {
-        var result = settings.SetProvider(request.Provider, session.CompanyId);
+        var result = settings.Save(request, session.CompanyId);
         audit.Record(session.CompanyId, session.Id, session.Username, "llm_settings.update", "llm_settings", success: true, details: result.Provider);
         return Results.Ok(result);
     }
     catch (InvalidOperationException exception)
     {
         audit.Record(session.CompanyId, session.Id, session.Username, "llm_settings.update", "llm_settings", success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
+app.MapPost("/api/admin/data-sources/rotate-secrets", (HttpContext context, AuthTokenService tokens, DataSourceService dataSources, AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    try
+    {
+        var result = dataSources.RotateConnectionSecrets(session.CompanyId);
+        audit.Record(session.CompanyId, session.Id, session.Username, "data_source.secret.rotate", "data_source", success: true, details: $"{result.RotatedCount} rotated, {result.SkippedCount} skipped");
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(session.CompanyId, session.Id, session.Username, "data_source.secret.rotate", "data_source", success: false, details: exception.Message);
         return Results.BadRequest(new { error = exception.Message });
     }
 }).DisableAntiforgery();
@@ -175,6 +297,23 @@ app.MapGet("/api/admin/metrics", (
         audit = audit.GetSummary(session.CompanyId)
     });
 });
+
+app.MapPost("/api/admin/retention/run", (
+    HttpContext context,
+    AuthTokenService tokens,
+    RetentionService retention,
+    AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    var result = retention.Apply(session.CompanyId);
+    audit.Record(session.CompanyId, session.Id, session.Username, "retention.run", "retention", success: true, details: $"audit={result.DeletedAuditEvents}; reports={result.DeletedReports}");
+    return Results.Ok(result);
+}).DisableAntiforgery();
 
 app.MapGet("/api/admin/audit-log", (
     string? action,
@@ -280,6 +419,64 @@ app.MapPost("/api/query", async (
     return Results.Ok(result);
 }).DisableAntiforgery();
 
+app.MapPost("/api/query/jobs", async (
+    QueryJobSubmitRequest request,
+    HttpContext context,
+    AuthTokenService tokens,
+    BackgroundQueryService jobs,
+    AuditLogService audit,
+    CancellationToken cancellationToken) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+
+    try
+    {
+        var job = await jobs.EnqueueAsync(request, session.CompanyId, session.Id, session.Username, cancellationToken);
+        audit.Record(session.CompanyId, session.Id, session.Username, "query.background.enqueue", "query_job", job.Id, success: true, details: request.Text);
+        return Results.Accepted($"/api/query/jobs/{job.Id}", job);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(session.CompanyId, session.Id, session.Username, "query.background.enqueue", "query_job", success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
+app.MapGet("/api/query/jobs/{id}", (
+    string id,
+    HttpContext context,
+    AuthTokenService tokens,
+    BackgroundQueryService jobs) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+
+    var job = jobs.Get(id, session.CompanyId, session.Username, IsAdmin(session));
+    return job == null ? Results.NotFound(new { error = "Query job not found." }) : Results.Ok(job);
+});
+
+app.MapDelete("/api/query/jobs/{id}", (
+    string id,
+    HttpContext context,
+    AuthTokenService tokens,
+    BackgroundQueryService jobs,
+    AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+
+    var canceled = jobs.Cancel(id, session.CompanyId, session.Username, IsAdmin(session));
+    if (!canceled)
+        return Results.NotFound(new { error = "Query job not found." });
+
+    audit.Record(session.CompanyId, session.Id, session.Username, "query.background.cancel", "query_job", id, success: true);
+    return Results.NoContent();
+});
+
 app.MapGet("/api/reports", (HttpContext context, AuthTokenService tokens, ReportService reports) =>
 {
     var session = GetCurrentSession(context, tokens);
@@ -356,4 +553,7 @@ static AuthUserSession? GetCurrentSession(HttpContext context, AuthTokenService 
 }
 
 static bool IsAdmin(AuthUserSession session) =>
-    string.Equals(session.Role, AppRoles.Admin, StringComparison.OrdinalIgnoreCase);
+    AppRoles.CanAdminister(session.Role);
+
+static string BuildRetryAfterMessage(TimeSpan retryAfter) =>
+    $"Too many login attempts. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} sec.";

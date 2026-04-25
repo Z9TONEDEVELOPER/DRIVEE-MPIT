@@ -136,6 +136,7 @@
                     <div class="bi-bubble bi-bubble-bot bi-thinking">
                         <span class="bi-typing"><span></span><span></span><span></span></span>
                         <span>@_thinkingLabel</span>
+                        <button type="button" class="bi-cancel-query" @onclick="CancelQuery">Отменить</button>
                     </div>
                 </div>
             }
@@ -191,6 +192,7 @@
     private bool _templatesOpen;
     private int? _openedReportId;
     private int _lastRenderedCount;
+    private CancellationTokenSource? _currentQueryCancellation;
 
     private readonly string[] _templates =
     {
@@ -270,6 +272,7 @@
         if (_busy) return;
         _messages.Add(new WorkspaceChatMessage { Role = "user", Text = q });
         _busy = true;
+        _currentQueryCancellation = new CancellationTokenSource();
         _thinkingLabel = "Интерпретирую запрос…";
         WorkspaceState.ThinkingLabel = _thinkingLabel;
         WorkspaceState.NotifyChanged();
@@ -282,7 +285,8 @@
                 .Select(m => m.Result!.Intent)
                 .LastOrDefault();
 
-            var pr = await Engine.RunAsync(q, history, prevIntent, companyId: _companyId, userKey: _username);
+            var pr = await Engine.RunAsync(q, history, prevIntent, _currentQueryCancellation.Token, companyId: _companyId, userKey: _username);
+            _currentQueryCancellation.Token.ThrowIfCancellationRequested();
             pr.UserQuery = q;
             Audit.Record(_companyId, _userId, _username, "query.run", "query", success: string.IsNullOrWhiteSpace(pr.Error), details: q);
 
@@ -301,6 +305,15 @@
             }
             _messages.Add(msg);
         }
+        catch (OperationCanceledException)
+        {
+            Audit.Record(_companyId, _userId, _username, "query.cancel", "query", success: true, details: q);
+            _messages.Add(new WorkspaceChatMessage
+            {
+                Role = "chat",
+                Text = "Запрос отменён."
+            });
+        }
         catch (Exception exception)
         {
             _messages.Add(new WorkspaceChatMessage
@@ -312,6 +325,8 @@
         finally
         {
             _busy = false;
+            _currentQueryCancellation?.Dispose();
+            _currentQueryCancellation = null;
             WorkspaceState.ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
             _thinkingLabel = WorkspaceState.ThinkingLabel;
             WorkspaceState.NotifyChanged();
@@ -319,6 +334,14 @@
     }
 
     private void ToggleTemplates() => _templatesOpen = !_templatesOpen;
+
+    private void CancelQuery()
+    {
+        _currentQueryCancellation?.Cancel();
+        _thinkingLabel = "Отменяю запрос…";
+        WorkspaceState.ThinkingLabel = _thinkingLabel;
+        WorkspaceState.NotifyChanged();
+    }
 
     private void UseTemplate(string t)
     {

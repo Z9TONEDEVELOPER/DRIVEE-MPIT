@@ -20,6 +20,17 @@ public sealed class DataSourceService
     {
         WriteIndented = true
     };
+    private static readonly string[] ForbiddenSemanticSchemas =
+    {
+        "information_schema",
+        "pg_catalog",
+        "pg_toast",
+        "mysql",
+        "performance_schema",
+        "sys",
+        "sqlite_master",
+        "sqlite_schema"
+    };
 
     public DataSourceService(IConfiguration configuration, IHostEnvironment environment, TenantContext tenantContext, SecretProtector secretProtector)
     {
@@ -113,6 +124,10 @@ public sealed class DataSourceService
             if (string.IsNullOrWhiteSpace(secret))
                 throw new InvalidOperationException("Укажите строку подключения.");
 
+            var runtimeChanged =
+                !string.Equals(existing.Provider, provider, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existing.ConnectionString, secret, StringComparison.Ordinal);
+
             using var update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText = @"
@@ -122,6 +137,9 @@ public sealed class DataSourceService
                     connection_string = $connection_mask,
                     connection_secret = $connection_secret,
                     semantic_json = $semantic_json,
+                    schema_json = CASE WHEN $runtime_changed = 1 THEN NULL ELSE schema_json END,
+                    last_validated_at = CASE WHEN $runtime_changed = 1 THEN NULL ELSE last_validated_at END,
+                    last_validation_error = CASE WHEN $runtime_changed = 1 THEN NULL ELSE last_validation_error END,
                     updated_at = $updated_at
                 WHERE id = $id AND company_id = $company_id";
             update.Parameters.AddWithValue("$id", input.Id.Value);
@@ -131,6 +149,7 @@ public sealed class DataSourceService
             update.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(secret));
             update.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(secret));
             update.Parameters.AddWithValue("$semantic_json", (object?)semanticJson ?? DBNull.Value);
+            update.Parameters.AddWithValue("$runtime_changed", runtimeChanged ? 1 : 0);
             update.Parameters.AddWithValue("$updated_at", now.ToString("O"));
             update.ExecuteNonQuery();
             id = input.Id.Value;
@@ -173,6 +192,74 @@ public sealed class DataSourceService
         using var transaction = connection.BeginTransaction();
         ActivateCore(connection, transaction, tenantId, id);
         transaction.Commit();
+    }
+
+    public void EnsureActiveSourceReadyForAnalytics(int? companyId = null)
+    {
+        var active = GetActive(companyId);
+        if (!active.IsVerified)
+        {
+            var detail = string.IsNullOrWhiteSpace(active.LastValidationError)
+                ? "Сначала запустите проверку подключения."
+                : active.LastValidationError;
+            throw new InvalidOperationException($"Активный источник `{active.Name}` не прошёл проверку. {detail}");
+        }
+
+        if (!active.IsBuiltin && string.IsNullOrWhiteSpace(active.SemanticJson))
+            throw new InvalidOperationException($"Активный источник `{active.Name}` не содержит semantic layer.");
+    }
+
+    public SecretRotationResult RotateConnectionSecrets(int? companyId = null)
+    {
+        var tenantId = NormalizeCompanyId(companyId);
+        var rows = new List<(int Id, string ConnectionString)>();
+        using (var connection = OpenMetadataConnection())
+        {
+            using var select = connection.CreateCommand();
+            select.CommandText = @"
+                SELECT id, connection_secret, connection_string
+                FROM data_sources
+                WHERE company_id = $company_id";
+            select.Parameters.AddWithValue("$company_id", tenantId);
+
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                var protectedSecret = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var fallbackMask = reader.GetString(2);
+                if (string.IsNullOrWhiteSpace(protectedSecret))
+                    continue;
+
+                rows.Add((reader.GetInt32(0), _secretProtector.Unprotect(protectedSecret) ?? fallbackMask));
+            }
+        }
+
+        var rotated = 0;
+        using (var connection = OpenMetadataConnection())
+        using (var transaction = connection.BeginTransaction())
+        {
+            foreach (var row in rows)
+            {
+                using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = @"
+                    UPDATE data_sources
+                    SET connection_secret = $connection_secret,
+                        connection_string = $connection_mask,
+                        updated_at = $updated_at
+                    WHERE id = $id AND company_id = $company_id";
+                update.Parameters.AddWithValue("$id", row.Id);
+                update.Parameters.AddWithValue("$company_id", tenantId);
+                update.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(row.ConnectionString));
+                update.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(row.ConnectionString));
+                update.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
+                rotated += update.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+
+        return new SecretRotationResult(rotated, rows.Count - rotated);
     }
 
     public void Delete(int id, int? companyId = null)
@@ -441,10 +528,10 @@ public sealed class DataSourceService
             insert.CommandText = @"
                 INSERT INTO data_sources(
                     company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json,
-                    is_builtin, is_active, created_at, updated_at)
+                    is_builtin, is_active, created_at, updated_at, last_validated_at, last_validation_error)
                 VALUES(
                     $company_id, $name, $provider, $connection_mask, $connection_secret, NULL, NULL,
-                    1, 1, $created_at, $updated_at)";
+                    1, 1, $created_at, $updated_at, $last_validated_at, NULL)";
             insert.Parameters.AddWithValue("$company_id", tenantId);
             insert.Parameters.AddWithValue("$name", "Drivee demo dataset");
             insert.Parameters.AddWithValue("$provider", DataSourceProviders.Sqlite);
@@ -452,7 +539,23 @@ public sealed class DataSourceService
             insert.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(_defaultAnalyticsDb));
             insert.Parameters.AddWithValue("$created_at", DateTime.UtcNow.ToString("O"));
             insert.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("$last_validated_at", DateTime.UtcNow.ToString("O"));
             insert.ExecuteNonQuery();
+        }
+        else
+        {
+            using var markBuiltinVerified = connection.CreateCommand();
+            markBuiltinVerified.Transaction = transaction;
+            markBuiltinVerified.CommandText = @"
+                UPDATE data_sources
+                SET last_validated_at = COALESCE(last_validated_at, $last_validated_at),
+                    last_validation_error = NULL
+                WHERE company_id = $company_id
+                  AND is_builtin = 1
+                  AND last_validated_at IS NULL";
+            markBuiltinVerified.Parameters.AddWithValue("$company_id", tenantId);
+            markBuiltinVerified.Parameters.AddWithValue("$last_validated_at", DateTime.UtcNow.ToString("O"));
+            markBuiltinVerified.ExecuteNonQuery();
         }
 
         using var anyActive = connection.CreateCommand();
@@ -480,6 +583,14 @@ public sealed class DataSourceService
 
         if (!dataSource.IsBuiltin && string.IsNullOrWhiteSpace(dataSource.SemanticJson))
             throw new InvalidOperationException("Перед активацией заполните semantic layer: метрики, таблицы, поля, фильтры и группировки.");
+
+        if (!dataSource.IsVerified)
+        {
+            var detail = string.IsNullOrWhiteSpace(dataSource.LastValidationError)
+                ? "Сначала запустите проверку подключения."
+                : dataSource.LastValidationError;
+            throw new InvalidOperationException($"Перед активацией источник должен пройти проверку. {detail}");
+        }
 
         using var deactivate = connection.CreateCommand();
         deactivate.Transaction = transaction;
@@ -756,7 +867,62 @@ public sealed class DataSourceService
         if (parsed.Sources.Count == 0 || parsed.Metrics.Count == 0)
             throw new InvalidOperationException("Semantic layer должен содержать хотя бы один source и одну metric.");
 
+        ValidateSemanticLayerSafety(parsed);
+
         return JsonSerializer.Serialize(parsed, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+    }
+
+    private static void ValidateSemanticLayerSafety(SemanticLayerJson semanticLayer)
+    {
+        foreach (var source in semanticLayer.Sources)
+            ValidateSemanticTableReference(source.Table, source.Key);
+    }
+
+    private static void ValidateSemanticTableReference(string tableReference, string sourceKey)
+    {
+        if (string.IsNullOrWhiteSpace(tableReference))
+            throw new InvalidOperationException($"Semantic source `{sourceKey}` должен содержать table.");
+
+        if (tableReference.Contains(';', StringComparison.Ordinal) ||
+            tableReference.Contains("--", StringComparison.Ordinal) ||
+            tableReference.Contains("/*", StringComparison.Ordinal) ||
+            tableReference.Contains("*/", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Semantic source `{sourceKey}` содержит опасную table-ссылку.");
+        }
+
+        var parts = tableReference
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(UnquoteIdentifier)
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+
+        if (parts.Count == 0 || parts.Count > 2)
+            throw new InvalidOperationException($"Semantic source `{sourceKey}` должен ссылаться на table или schema.table.");
+
+        foreach (var part in parts)
+        {
+            if (ForbiddenSemanticSchemas.Any(schema => string.Equals(schema, part, StringComparison.OrdinalIgnoreCase)) ||
+                part.StartsWith("pg_", StringComparison.OrdinalIgnoreCase) ||
+                part.StartsWith("sqlite_", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Semantic source `{sourceKey}` ссылается на запрещённую системную схему или таблицу `{part}`.");
+            }
+        }
+    }
+
+    private static string UnquoteIdentifier(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[^1] == '"') ||
+             (trimmed[0] == '`' && trimmed[^1] == '`') ||
+             (trimmed[0] == '[' && trimmed[^1] == ']')))
+        {
+            return trimmed[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+        }
+
+        return trimmed;
     }
 
     private static string NormalizeProvider(string provider)

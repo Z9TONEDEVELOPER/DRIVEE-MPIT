@@ -9,6 +9,7 @@ public sealed class SecretProtector
 {
     private const string Prefix = "enc:v1:";
     private readonly byte[] _key;
+    private readonly IReadOnlyList<byte[]> _previousKeys;
 
     public SecretProtector(IConfiguration configuration, IHostEnvironment environment)
     {
@@ -27,6 +28,11 @@ public sealed class SecretProtector
             throw new InvalidOperationException("Security:SecretProtectionKey must contain at least 32 characters.");
 
         _key = SHA256.HashData(Encoding.UTF8.GetBytes(configured));
+        _previousKeys = (configuration.GetSection("Security:PreviousSecretProtectionKeys").Get<string[]>()?
+            .Where(key => !string.IsNullOrWhiteSpace(key) && key.Length >= 32)
+            .Select(key => SHA256.HashData(Encoding.UTF8.GetBytes(key)))
+            .ToList())
+            ?? new List<byte[]>();
     }
 
     public string Protect(string value)
@@ -65,9 +71,31 @@ public sealed class SecretProtector
         var ciphertext = Convert.FromBase64String(parts[2]);
         var plaintext = new byte[ciphertext.Length];
 
-        using var aes = new AesGcm(_key, tag.Length);
-        aes.Decrypt(nonce, ciphertext, tag, plaintext);
-        return Encoding.UTF8.GetString(plaintext);
+        if (TryDecrypt(_key, nonce, tag, ciphertext, plaintext))
+            return Encoding.UTF8.GetString(plaintext);
+
+        foreach (var previousKey in _previousKeys)
+        {
+            if (TryDecrypt(previousKey, nonce, tag, ciphertext, plaintext))
+                return Encoding.UTF8.GetString(plaintext);
+        }
+
+        throw new InvalidOperationException("Protected secret cannot be decrypted with configured keys.");
+    }
+
+    private static bool TryDecrypt(byte[] key, byte[] nonce, byte[] tag, byte[] ciphertext, byte[] plaintext)
+    {
+        try
+        {
+            Array.Clear(plaintext);
+            using var aes = new AesGcm(key, tag.Length);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
     }
 
     public static string MaskConnectionString(string connectionString)

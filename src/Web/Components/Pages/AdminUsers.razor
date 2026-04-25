@@ -1,5 +1,5 @@
 @page "/admin/users"
-@attribute [Authorize(Roles = AppRoles.Admin)]
+@attribute [Authorize(Roles = AppRoles.AdminAccess)]
 @rendermode InteractiveServer
 @inject UserService Users
 @inject EmailService Email
@@ -49,6 +49,49 @@
             {
                 <div class="admin-error">@_error</div>
             }
+
+            <section class="admin-section">
+                <div class="admin-section-head">
+                    <div>
+                        <h2>Компания</h2>
+                        <div class="bi-tagline">Название, команда и готовность источников данных для аналитики.</div>
+                    </div>
+                    @if (_company != null)
+                    {
+                        <span class="admin-count">@_company.ActiveUserCount / @_company.UserCount активны</span>
+                    }
+                </div>
+
+                <div class="bi-card company-admin-card">
+                    <div class="company-admin-main">
+                        <label class="company-name-field">
+                            Название компании
+                            <input class="auth-input" @bind="_companyNameInput" @bind:event="oninput" disabled="@_busy" />
+                        </label>
+                        <button type="button" class="bi-btn" @onclick="SaveCompany" disabled="@_busy">Сохранить</button>
+                    </div>
+
+                    @if (_company != null)
+                    {
+                        <div class="company-admin-facts">
+                            <div>
+                                <div class="llm-fact-label">Slug</div>
+                                <div class="llm-fact-value">@_company.Slug</div>
+                            </div>
+                            <div>
+                                <div class="llm-fact-label">Пользователи</div>
+                                <div class="llm-fact-value">@_company.UserCount</div>
+                                <div class="llm-fact-sub">@_company.ActiveUserCount активны</div>
+                            </div>
+                            <div>
+                                <div class="llm-fact-label">Источники</div>
+                                <div class="llm-fact-value">@_company.DataSourceCount</div>
+                                <div class="llm-fact-sub">@_company.VerifiedDataSourceCount проверены</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
 
             <section class="admin-section">
                 <div class="admin-section-head">
@@ -141,12 +184,27 @@
                                     <div class="admin-user-sub">@item.Username</div>
                                 </td>
                                 <td>@(item.Email ?? "—")</td>
-                                <td><span class="admin-role @(item.Role == AppRoles.Admin ? "admin" : "user")">@item.Role</span></td>
+                                <td>
+                                    <select class="admin-role-select @RoleClass(item.Role)"
+                                            value="@item.Role"
+                                            disabled="@_busy"
+                                            @onchange="eventArgs => ChangeUserRole(item.Id, eventArgs.Value?.ToString() ?? AppRoles.Analyst)">
+                                        @foreach (var role in AppRoles.All)
+                                        {
+                                            <option value="@role">@role</option>
+                                        }
+                                    </select>
+                                </td>
                                 <td>@item.ReportCount</td>
                                 <td>@FormatDate(item.LastLoginAt)</td>
                                 <td>@item.CreatedAt.ToLocalTime().ToString("g")</td>
                                 <td>
-                                    <button class="bi-btn" @onclick="() => OpenUser(item.Id)">Открыть</button>
+                                    <button class="bi-btn ghost" @onclick="() => OpenUser(item.Id)">Открыть</button>
+                                    <button class="bi-btn @(item.IsActive ? "danger" : "")"
+                                            disabled="@(_busy || item.Id == _adminUserId)"
+                                            @onclick="() => SetUserActive(item.Id, !item.IsActive)">
+                                        @(item.IsActive ? "Отключить" : "Включить")
+                                    </button>
                                 </td>
                             </tr>
                         }
@@ -209,6 +267,8 @@
     private List<RegistrationRequest> _pendingRequests = new();
     private List<LocalEmailMessage> _localEmails = new();
     private readonly Dictionary<int, string> _rejectionReasons = new();
+    private Company? _company;
+    private string _companyNameInput = "";
     private string _username = "";
     private string _displayName = "";
     private int _companyId = CompanyDefaults.DefaultCompanyId;
@@ -228,6 +288,84 @@
     }
 
     private void OpenUser(int id) => Navigation.NavigateTo($"/admin/users/{id}");
+
+    private void SaveCompany()
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            _company = Users.UpdateCompany(_companyId, _companyNameInput);
+            _companyNameInput = _company.Name;
+            Audit.Record(_companyId, _adminUserId, _username, "company.update", "company", _companyId.ToString(), success: true, details: _company.Name);
+            _notice = "Компания обновлена.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ChangeUserRole(int userId, string role)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            var user = Users.UpdateUserRole(_companyId, userId, role);
+            Audit.Record(_companyId, _adminUserId, _username, "user.role.update", "user", userId.ToString(), success: true, details: user.Role);
+            _notice = $"Роль пользователя `{user.DisplayName}` обновлена: {user.Role}.";
+            Refresh();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+            Refresh();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SetUserActive(int userId, bool isActive)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            var user = Users.SetUserActive(_companyId, userId, isActive);
+            Audit.Record(_companyId, _adminUserId, _username, isActive ? "user.activate" : "user.deactivate", "user", userId.ToString(), success: true);
+            _notice = isActive
+                ? $"Пользователь `{user.DisplayName}` включён."
+                : $"Пользователь `{user.DisplayName}` отключён.";
+            Refresh();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task Approve(int requestId)
     {
@@ -303,6 +441,8 @@
 
     private void Refresh()
     {
+        _company = Users.GetCompany(_companyId);
+        _companyNameInput = _company.Name;
         _users = Users.ListUsers(_companyId);
         _pendingRequests = Users.ListRegistrationRequests(_companyId, RegistrationRequestStatuses.Pending);
         _localEmails = Email.ListLocalEmails();
@@ -321,4 +461,7 @@
 
     private static string FormatDate(DateTime? value) =>
         value?.ToLocalTime().ToString("g") ?? "—";
+
+    private static string RoleClass(string role) =>
+        AppRoles.Normalize(role).ToLowerInvariant();
 }

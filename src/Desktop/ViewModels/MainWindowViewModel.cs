@@ -24,16 +24,21 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool _isLoggingIn;
     [ObservableProperty] private ObservableCollection<AppUserSummary> _users = new();
     [ObservableProperty] private ObservableCollection<RegistrationRequest> _pendingRegistrations = new();
+    [ObservableProperty] private Company? _company;
     [ObservableProperty] private string? _adminError;
     [ObservableProperty] private string? _adminNotice;
     [ObservableProperty] private LlmSettings? _llmSettings;
     [ObservableProperty] private string _selectedLlmProvider = LlmProviders.Local;
+    [ObservableProperty] private string _gigaChatAuthorizationKey = "";
     [ObservableProperty] private bool _isSavingLlmSettings;
 
     public bool IsWorkspacePage => CurrentPage == "workspace";
     public bool IsReportsPage => CurrentPage == "reports";
     public bool IsUsersPage => CurrentPage == "users";
     public IReadOnlyList<string> LlmProviderOptions { get; } = LlmProviders.All;
+    public string CompanyLabel => Company == null
+        ? "Компания"
+        : $"{Company.Name} · {Company.ActiveUserCount}/{Company.UserCount} активны · {Company.VerifiedDataSourceCount}/{Company.DataSourceCount} источников проверены";
     public string CurrentLlmProviderLabel => LlmSettings?.Provider ?? LlmProviders.Local;
     public string LocalLlmLabel => LlmSettings == null
         ? "local-model"
@@ -87,7 +92,7 @@ public partial class MainWindowViewModel : ObservableObject
             var session = await _api.LoginAsync(LoginUsername.Trim(), LoginPassword);
             Username = session.User.Username;
             DisplayName = session.User.DisplayName;
-            IsAdmin = session.User.Role == AppRoles.Admin;
+            IsAdmin = AppRoles.CanAdminister(session.User.Role);
             IsAuthenticated = true;
             LoginPassword = "";
             CurrentPage = "workspace";
@@ -120,8 +125,10 @@ public partial class MainWindowViewModel : ObservableObject
         Chat.Reports.Clear();
         Users.Clear();
         PendingRegistrations.Clear();
+        Company = null;
         LlmSettings = null;
         SelectedLlmProvider = LlmProviders.Local;
+        GigaChatAuthorizationKey = "";
         AdminNotice = null;
         AdminError = null;
     }
@@ -138,6 +145,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             Users = new ObservableCollection<AppUserSummary>(await _api.GetUsersAsync());
             PendingRegistrations = new ObservableCollection<RegistrationRequest>(await _api.GetPendingRegistrationsAsync());
+            Company = await _api.GetCompanyAsync();
             LlmSettings = await _api.GetLlmSettingsAsync();
             SelectedLlmProvider = LlmSettings.Provider;
         }
@@ -158,8 +166,9 @@ public partial class MainWindowViewModel : ObservableObject
         IsSavingLlmSettings = true;
         try
         {
-            LlmSettings = await _api.UpdateLlmSettingsAsync(SelectedLlmProvider);
+            LlmSettings = await _api.UpdateLlmSettingsAsync(SelectedLlmProvider, GigaChatAuthorizationKey);
             SelectedLlmProvider = LlmSettings.Provider;
+            GigaChatAuthorizationKey = "";
             AdminNotice = $"LLM provider сохранён: {LlmSettings.Provider}.";
         }
         catch (Exception exception)
@@ -178,6 +187,11 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(LocalLlmLabel));
         OnPropertyChanged(nameof(GigaChatLabel));
         OnPropertyChanged(nameof(GigaChatSecretStatus));
+    }
+
+    partial void OnCompanyChanged(Company? value)
+    {
+        OnPropertyChanged(nameof(CompanyLabel));
     }
 
     [RelayCommand]

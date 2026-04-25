@@ -397,6 +397,19 @@
                         </Border>
 
                         <Border Classes="reports-card">
+                            <StackPanel Margin="16,14" Spacing="4">
+                                <TextBlock Text="Компания"
+                                           FontSize="15"
+                                           FontWeight="Bold"
+                                           Foreground="#0f172a"/>
+                                <TextBlock Text="{Binding CompanyLabel}"
+                                           FontSize="12.5"
+                                           Foreground="#475569"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="reports-card">
                             <StackPanel Spacing="14" Margin="16,14">
                                 <Grid ColumnDefinitions="*,Auto">
                                     <StackPanel>
@@ -404,7 +417,7 @@
                                                    FontSize="15"
                                                    FontWeight="Bold"
                                                    Foreground="#0f172a"/>
-                                        <TextBlock Text="Выбор между локальным сервером и GigaChat. Ключ в UI не показывается."
+                                        <TextBlock Text="Выбор между локальным сервером и GigaChat. Ключ можно заменить, существующий ключ не показывается."
                                                    FontSize="12"
                                                    Foreground="#64748b"
                                                    TextWrapping="Wrap"/>
@@ -416,7 +429,7 @@
                                             Command="{Binding SaveLlmSettingsCommand}"/>
                                 </Grid>
 
-                                <Grid ColumnDefinitions="260,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="10">
+                                <Grid ColumnDefinitions="260,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
                                     <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
                                         <TextBlock Text="Провайдер"
                                                    Foreground="#475569"
@@ -462,6 +475,21 @@
                                                    Foreground="#047857"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Spacing="6">
+                                        <TextBlock Text="GigaChat AuthorizationKey"
+                                                   Foreground="#475569"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBox Text="{Binding GigaChatAuthorizationKey, Mode=TwoWay}"
+                                                 PasswordChar="*"
+                                                 PlaceholderText="Новый ключ, если нужно заменить"
+                                                 IsEnabled="{Binding !IsSavingLlmSettings}"/>
+                                        <TextBlock Text="При сохранении ключ шифруется в metadata DB и не возвращается обратно в UI."
+                                                   Foreground="#64748b"
+                                                   FontSize="11.5"
+                                                   TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -543,6 +571,7 @@
                                         <DataGridTextColumn Header="Логин" Binding="{Binding Username}" Width="180"/>
                                         <DataGridTextColumn Header="Email" Binding="{Binding Email}" Width="220"/>
                                         <DataGridTextColumn Header="Роль" Binding="{Binding Role}" Width="110"/>
+                                        <DataGridTextColumn Header="Активен" Binding="{Binding IsActive}" Width="90"/>
                                         <DataGridTextColumn Header="Отчётов" Binding="{Binding ReportCount}" Width="100"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
