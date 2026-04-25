@@ -78,6 +78,9 @@ public class BiApiClient
     public async Task<List<AppUserSummary>> GetUsersAsync(CancellationToken ct = default)
         => (await _http.GetFromJsonAsync<List<AppUserSummary>>("/api/admin/users", _json, ct)) ?? new();
 
+    public async Task<Company> GetCompanyAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<Company>("/api/admin/company", _json, ct))!;
+
     public async Task<List<RegistrationRequest>> GetPendingRegistrationsAsync(CancellationToken ct = default)
         => (await _http.GetFromJsonAsync<List<RegistrationRequest>>(
             $"/api/admin/registration-requests?status={RegistrationRequestStatuses.Pending}",
@@ -87,9 +90,13 @@ public class BiApiClient
     public async Task<LlmSettings> GetLlmSettingsAsync(CancellationToken ct = default)
         => (await _http.GetFromJsonAsync<LlmSettings>("/api/admin/llm-settings", _json, ct))!;
 
-    public async Task<LlmSettings> UpdateLlmSettingsAsync(string provider, CancellationToken ct = default)
+    public async Task<LlmSettings> UpdateLlmSettingsAsync(string provider, string? gigaChatAuthorizationKey = null, CancellationToken ct = default)
     {
-        var resp = await _http.PostAsJsonAsync("/api/admin/llm-settings", new UpdateLlmSettingsRequest(provider), _json, ct);
+        var resp = await _http.PostAsJsonAsync(
+            "/api/admin/llm-settings",
+            new UpdateLlmSettingsRequest(provider, gigaChatAuthorizationKey),
+            _json,
+            ct);
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<LlmSettings>(_json, ct))!;
     }

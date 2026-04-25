@@ -38,6 +38,21 @@ public sealed class CompanyDataSource
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastValidatedAt { get; set; }
     public string? LastValidationError { get; set; }
+    public bool IsVerified => LastValidatedAt.HasValue && string.IsNullOrWhiteSpace(LastValidationError);
+    public string Status => !string.IsNullOrWhiteSpace(LastValidationError)
+        ? DataSourceStatuses.Error
+        : IsActive
+        ? IsVerified ? DataSourceStatuses.Active : DataSourceStatuses.ActiveNotVerified
+        : IsVerified ? DataSourceStatuses.Verified : DataSourceStatuses.Draft;
+}
+
+public static class DataSourceStatuses
+{
+    public const string Active = "active";
+    public const string ActiveNotVerified = "active_not_verified";
+    public const string Verified = "verified";
+    public const string Draft = "draft";
+    public const string Error = "error";
 }
 
 public sealed class DataSourceInput

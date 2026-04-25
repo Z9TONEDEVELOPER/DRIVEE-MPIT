@@ -18,6 +18,7 @@ public class NlSqlEngine
     private readonly SqlBuilder _sqlBuilder;
     private readonly ExplainEngine _explainEngine;
     private readonly QueryExecutor _queryExecutor;
+    private readonly DataSourceService _dataSources;
     private readonly TenantContext _tenantContext;
     private readonly QueryLoadControl _loadControl;
     private readonly OperationalMetricsService _metrics;
@@ -30,6 +31,7 @@ public class NlSqlEngine
         SqlBuilder sqlBuilder,
         ExplainEngine explainEngine,
         QueryExecutor queryExecutor,
+        DataSourceService dataSources,
         TenantContext tenantContext,
         QueryLoadControl loadControl,
         OperationalMetricsService metrics,
@@ -41,6 +43,7 @@ public class NlSqlEngine
         _sqlBuilder = sqlBuilder;
         _explainEngine = explainEngine;
         _queryExecutor = queryExecutor;
+        _dataSources = dataSources;
         _tenantContext = tenantContext;
         _loadControl = loadControl;
         _metrics = metrics;
@@ -56,12 +59,14 @@ public class NlSqlEngine
         string? userKey = null)
     {
         using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
+        using var activeRequestScope = _metrics.EnterRequest();
         var pipelineResult = new PipelineResult { UserQuery = userQuery };
         var totalStopwatch = Stopwatch.StartNew();
         var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!_loadControl.TryAcquire(effectiveCompanyId, userKey, out var retryAfter))
             {
                 _metrics.RecordRateLimited(effectiveCompanyId, userKey);
@@ -83,6 +88,9 @@ public class NlSqlEngine
                 return pipelineResult;
             }
 
+            _dataSources.EnsureActiveSourceReadyForAnalytics(effectiveCompanyId);
+            cancellationToken.ThrowIfCancellationRequested();
+
             var llmStopwatch = Stopwatch.StartNew();
             var rawIntent = await _llmService.InterpretAsync(
                 userQuery,
@@ -93,6 +101,7 @@ public class NlSqlEngine
             _logger.LogInformation("Pipeline timing: stage=llm elapsed_ms={ElapsedMs}", llmStopwatch.ElapsedMilliseconds);
 
             var validation = _intentValidator.ValidateParsedIntent(rawIntent, userQuery, previousIntent);
+            cancellationToken.ThrowIfCancellationRequested();
             pipelineResult.Intent = validation.NormalizedIntent;
             pipelineResult.Confidence = validation.NormalizedIntent.Confidence;
             pipelineResult.Visualization = validation.NormalizedIntent.Visualization ?? validation.NormalizedIntent.VisualizationHint ?? "table";
@@ -113,6 +122,7 @@ public class NlSqlEngine
             var validatedIntent = validation.ValidatedIntent;
             var sqlBuildStopwatch = Stopwatch.StartNew();
             var builtSql = _sqlBuilder.Build(validatedIntent);
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureDifferentIntentsProduceDifferentSql(previousIntent, validatedIntent, builtSql);
             sqlBuildStopwatch.Stop();
             _logger.LogInformation("Pipeline timing: stage=sql_build elapsed_ms={ElapsedMs}", sqlBuildStopwatch.ElapsedMilliseconds);
@@ -157,6 +167,11 @@ public class NlSqlEngine
             if (pipelineResult.Result.RowCount == 0)
                 pipelineResult.Warnings.Add("Запрос выполнен, но данных по выбранным условиям нет.");
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("NL→SQL pipeline canceled.");
+            throw;
+        }
         catch (Exception exception)
         {
             _logger.LogError(exception, "NL→SQL pipeline failed.");
@@ -192,6 +207,7 @@ public class NlSqlEngine
         string? userKey = null)
     {
         using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
+        using var activeRequestScope = _metrics.EnterRequest();
         var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
         var stopwatch = Stopwatch.StartNew();
         if (!_loadControl.TryAcquire(effectiveCompanyId, userKey, out var retryAfter))
@@ -204,6 +220,8 @@ public class NlSqlEngine
                 Error = BuildRateLimitMessage(retryAfter)
             };
         }
+
+        _dataSources.EnsureActiveSourceReadyForAnalytics(effectiveCompanyId);
 
         var storedIntent = JsonSerializer.Deserialize<QueryIntent>(intentJson, new JsonSerializerOptions
         {
@@ -246,6 +264,7 @@ public class NlSqlEngine
         string? userKey = null)
     {
         using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
+        using var activeRequestScope = _metrics.EnterRequest();
         var pipelineResult = new PipelineResult { UserQuery = userQuery };
         var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
         var stopwatch = Stopwatch.StartNew();
@@ -261,6 +280,7 @@ public class NlSqlEngine
 
         try
         {
+            _dataSources.EnsureActiveSourceReadyForAnalytics(effectiveCompanyId);
             correctedIntent.Kind = QueryIntentKinds.Query;
             correctedIntent.Confidence = Math.Max(correctedIntent.Confidence, 0.95);
             correctedIntent.Explanation = "Intent corrected by user in UI.";

@@ -142,6 +142,22 @@ public class ReportService
         cmd.ExecuteNonQuery();
     }
 
+    public int ApplyRetention(int companyId, int retentionDays)
+    {
+        if (retentionDays <= 0)
+            return 0;
+
+        using var c = OpenConnection();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            DELETE FROM reports
+            WHERE company_id = $company_id
+              AND created_at < $cutoff";
+        cmd.Parameters.AddWithValue("$company_id", companyId <= 0 ? CompanyDefaults.DefaultCompanyId : companyId);
+        cmd.Parameters.AddWithValue("$cutoff", DateTime.UtcNow.AddDays(-retentionDays).ToString("O"));
+        return cmd.ExecuteNonQuery();
+    }
+
     private static List<Report> ReadReports(SqliteCommand cmd)
     {
         var list = new List<Report>();

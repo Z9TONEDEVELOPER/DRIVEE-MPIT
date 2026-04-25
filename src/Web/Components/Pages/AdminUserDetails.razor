@@ -1,7 +1,8 @@
 @page "/admin/users/{Id:int}"
-@attribute [Authorize(Roles = AppRoles.Admin)]
+@attribute [Authorize(Roles = AppRoles.AdminAccess)]
 @rendermode InteractiveServer
 @inject UserService Users
+@inject AuditLogService Audit
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Drivee BI · User</PageTitle>
@@ -42,6 +43,16 @@
         }
         else
         {
+            @if (!string.IsNullOrWhiteSpace(_notice))
+            {
+                <div class="admin-notice">@_notice</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="admin-error">@_error</div>
+            }
+
             <div class="admin-grid">
                 <section class="bi-card">
                     <div class="bi-card-title">Профиль</div>
@@ -53,6 +64,22 @@
                         <div><strong>Создан:</strong> @_user.CreatedAt.ToLocalTime().ToString("g")</div>
                         <div><strong>Последний вход:</strong> @FormatDate(_user.LastLoginAt)</div>
                         <div><strong>Сохранённых отчётов:</strong> @_user.ReportCount</div>
+                    </div>
+                    <div class="admin-profile-actions">
+                        <label>
+                            Роль
+                            <select class="auth-input" value="@_user.Role" disabled="@_busy" @onchange="ChangeRole">
+                                @foreach (var role in AppRoles.All)
+                                {
+                                    <option value="@role">@role</option>
+                                }
+                            </select>
+                        </label>
+                        <button class="bi-btn @(_user.IsActive ? "danger" : "")"
+                                disabled="@(_busy || _user.Id == _adminUserId)"
+                                @onclick="ToggleActive">
+                            @(_user.IsActive ? "Отключить пользователя" : "Включить пользователя")
+                        </button>
                     </div>
                 </section>
 
@@ -102,6 +129,10 @@
     private string _adminUsername = "";
     private string _adminDisplayName = "";
     private int _companyId = CompanyDefaults.DefaultCompanyId;
+    private int _adminUserId;
+    private bool _busy;
+    private string? _notice;
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -109,7 +140,58 @@
         _adminUsername = authState.User.GetUsername();
         _adminDisplayName = authState.User.GetDisplayName();
         _companyId = authState.User.GetCompanyId();
+        _adminUserId = authState.User.GetUserId() ?? 0;
         _user = Users.GetUserDetail(_companyId, Id);
+    }
+
+    private void ChangeRole(ChangeEventArgs eventArgs)
+    {
+        if (_user == null || _busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            _user = Users.UpdateUserRole(_companyId, _user.Id, eventArgs.Value?.ToString() ?? AppRoles.Analyst);
+            Audit.Record(_companyId, _adminUserId, _adminUsername, "user.role.update", "user", _user.Id.ToString(), success: true, details: _user.Role);
+            _notice = "Роль обновлена.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+            _user = Users.GetUserDetail(_companyId, Id);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ToggleActive()
+    {
+        if (_user == null || _busy)
+            return;
+
+        _busy = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            var nextState = !_user.IsActive;
+            _user = Users.SetUserActive(_companyId, _user.Id, nextState);
+            Audit.Record(_companyId, _adminUserId, _adminUsername, nextState ? "user.activate" : "user.deactivate", "user", _user.Id.ToString(), success: true);
+            _notice = nextState ? "Пользователь включён." : "Пользователь отключён.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private static string FormatDate(DateTime? value) =>

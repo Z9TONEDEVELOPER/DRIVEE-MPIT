@@ -36,6 +36,7 @@ builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<AuditLogService>();
 builder.Services.AddSingleton<OperationalMetricsService>();
 builder.Services.AddSingleton<QueryLoadControl>();
+builder.Services.AddSingleton<LoginRateLimitService>();
 builder.Services.AddSingleton<LoadCacheService>();
 builder.Services.AddSingleton<AnalyticsRegressionService>();
 builder.Services.AddSingleton<DataSourceService>();
@@ -49,19 +50,26 @@ builder.Services.AddSingleton<SqlGuard>();
 builder.Services.AddSingleton<QueryExecutor>();
 builder.Services.AddSingleton<ExplainEngine>();
 builder.Services.AddSingleton<LlmSettingsService>();
+builder.Services.AddSingleton<SecurityChecklistService>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<EmailService>();
 builder.Services.AddScoped<NlSqlEngine>();
 builder.Services.AddScoped<WorkspaceSessionState>();
 builder.Services.AddSingleton<ReportService>();
+builder.Services.AddSingleton<RetentionService>();
+builder.Services.AddSingleton<ProductionMetadataGuardService>();
+builder.Services.AddSingleton<BackgroundQueryService>();
 
 var app = builder.Build();
 
+app.Services.GetRequiredService<ProductionMetadataGuardService>().EnsureProductionReady();
 _ = app.Services.GetRequiredService<DataSourceService>();
 app.Services.GetRequiredService<DatasetSeeder>().EnsureSeeded();
 _ = app.Services.GetRequiredService<ReportService>();
 _ = app.Services.GetRequiredService<UserService>();
+_ = app.Services.GetRequiredService<BackgroundQueryService>();
+app.Services.GetRequiredService<RetentionService>().Apply(CompanyDefaults.DefaultCompanyId);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -74,12 +82,21 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapPost("/auth/login", async (HttpContext context, UserService users, AuditLogService audit) =>
+app.MapPost("/auth/login", async (HttpContext context, UserService users, LoginRateLimitService loginRateLimit, AuditLogService audit) =>
 {
     var form = await context.Request.ReadFormAsync();
     var username = form["username"].ToString();
     var password = form["password"].ToString();
     var returnUrl = NormalizeReturnUrl(form["returnUrl"].ToString());
+
+    if (!loginRateLimit.TryAcquire(username, context.Connection.RemoteIpAddress?.ToString(), out var retryAfter))
+    {
+        var message = BuildRetryAfterMessage(retryAfter);
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, username, "auth.login.rate_limited", "user", success: false, details: message);
+        var rateLimitedUrl = $"/login?error={Uri.EscapeDataString(message)}&returnUrl={Uri.EscapeDataString(returnUrl)}";
+        context.Response.Redirect(rateLimitedUrl);
+        return;
+    }
 
     var user = users.Authenticate(username, password);
     if (user == null)
@@ -149,6 +166,58 @@ app.MapPost("/api/query", async (
     audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "query.run", "query", success: string.IsNullOrWhiteSpace(result.Error), details: queryText);
     return Results.Ok(result);
 }).DisableAntiforgery();
+
+app.MapPost("/api/query/jobs", async (
+    QueryJobSubmitRequest request,
+    HttpContext context,
+    BackgroundQueryService jobs,
+    AuditLogService audit,
+    CancellationToken cancellationToken) =>
+{
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    try
+    {
+        var job = await jobs.EnqueueAsync(request, GetApiCompanyId(context), GetApiUserId(context), GetApiUserName(context), cancellationToken);
+        audit.Record(GetApiCompanyId(context), GetApiUserId(context), GetApiUserName(context), "query.background.enqueue", "query_job", job.Id, success: true, details: request.Text);
+        return Results.Accepted($"/api/query/jobs/{job.Id}", job);
+    }
+    catch (InvalidOperationException exception)
+    {
+        audit.Record(GetApiCompanyId(context), GetApiUserId(context), GetApiUserName(context), "query.background.enqueue", "query_job", success: false, details: exception.Message);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
+
+app.MapGet("/api/query/jobs/{id}", (
+    string id,
+    HttpContext context,
+    BackgroundQueryService jobs) =>
+{
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var job = jobs.Get(id, GetApiCompanyId(context), GetApiUserName(context), IsApiAdmin(context));
+    return job == null ? Results.NotFound(new { error = "Query job not found." }) : Results.Ok(job);
+});
+
+app.MapDelete("/api/query/jobs/{id}", (
+    string id,
+    HttpContext context,
+    BackgroundQueryService jobs,
+    AuditLogService audit) =>
+{
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var canceled = jobs.Cancel(id, GetApiCompanyId(context), GetApiUserName(context), IsApiAdmin(context));
+    if (!canceled)
+        return Results.NotFound(new { error = "Query job not found." });
+
+    audit.Record(GetApiCompanyId(context), GetApiUserId(context), GetApiUserName(context), "query.background.cancel", "query_job", id, success: true);
+    return Results.NoContent();
+});
 
 app.MapGet("/api/reports", (ReportService reports, HttpContext context) =>
 {
@@ -252,4 +321,7 @@ static int? GetApiUserId(HttpContext context) =>
     int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 
 static bool IsApiAdmin(HttpContext context) =>
-    context.User.Identity?.IsAuthenticated == true && context.User.IsInRole(AppRoles.Admin);
+    context.User.Identity?.IsAuthenticated == true && context.User.IsAdmin();
+
+static string BuildRetryAfterMessage(TimeSpan retryAfter) =>
+    $"Too many login attempts. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} sec.";

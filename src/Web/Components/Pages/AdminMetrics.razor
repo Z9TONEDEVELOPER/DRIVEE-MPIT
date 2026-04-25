@@ -1,8 +1,10 @@
 @page "/admin/metrics"
-@attribute [Authorize(Roles = AppRoles.Admin)]
+@attribute [Authorize(Roles = AppRoles.AdminAccess)]
 @rendermode InteractiveServer
 @inject OperationalMetricsService Metrics
 @inject AuditLogService Audit
+@inject SecurityChecklistService SecurityChecklist
+@inject RetentionService Retention
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Drivee BI · Metrics</PageTitle>
@@ -43,18 +45,78 @@
                 <div class="admin-error">@_error</div>
             }
 
+            @if (!string.IsNullOrWhiteSpace(_notice))
+            {
+                <div class="admin-notice">@_notice</div>
+            }
+
             @if (_metrics != null && _auditSummary != null)
             {
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>Production secrets checklist</h2>
+                            <div class="bi-tagline">Проверка базовых настроек безопасности перед продажей компаниям.</div>
+                        </div>
+                        @if (_securityChecklist != null)
+                        {
+                            <span class="admin-count">@_securityChecklist.PassedCount / @_securityChecklist.TotalCount ok</span>
+                        }
+                    </div>
+
+                    @if (_securityChecklist != null)
+                    {
+                        <div class="security-checklist">
+                            @foreach (var item in _securityChecklist.Items)
+                            {
+                                <div class="security-check @(item.Passed ? "ok" : "attention")">
+                                    <span class="audit-status @(item.Passed ? "ok" : "bad")">@item.Status</span>
+                                    <div>
+                                        <div class="security-check-title">@item.Title</div>
+                                        <div class="security-check-details">@item.Details</div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
+
                 <section class="admin-section">
                     <div class="admin-section-head">
                         <div>
                             <h2>Сейчас</h2>
                             <div class="bi-tagline">Счётчики хранятся в памяти текущего процесса с момента запуска: @FormatDate(_metrics.StartedAt).</div>
                         </div>
-                        <button type="button" class="bi-btn ghost" @onclick="Refresh">Обновить</button>
+                        <div class="audit-filters">
+                            <button type="button" class="bi-btn ghost" @onclick="RunRetention">Retention cleanup</button>
+                            <button type="button" class="bi-btn ghost" @onclick="() => Refresh()">Обновить</button>
+                        </div>
                     </div>
 
                     <div class="ops-grid">
+                        <div class="ops-card">
+                            <div class="ops-label">Активные запросы</div>
+                            <div class="ops-value">@_metrics.ActiveRequests</div>
+                            <div class="ops-sub">pipeline сейчас</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">LLM queue</div>
+                            <div class="ops-value">@_metrics.QueuedLlmRequests</div>
+                            <div class="ops-sub">@_metrics.ActiveLlmRequests активных LLM вызовов</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">SQL queue</div>
+                            <div class="ops-value">@_metrics.QueuedSqlQueries</div>
+                            <div class="ops-sub">@_metrics.ActiveSqlQueries активных SQL запросов</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">Background jobs</div>
+                            <div class="ops-value">@_metrics.QueuedBackgroundJobs</div>
+                            <div class="ops-sub">@_metrics.ActiveBackgroundJobs выполняются</div>
+                        </div>
+                    </div>
+
+                    <div class="ops-grid ops-grid-secondary">
                         <div class="ops-card">
                             <div class="ops-label">Запросы за час</div>
                             <div class="ops-value">@_metrics.RequestsLastHour</div>
@@ -142,7 +204,7 @@
                                 <input type="checkbox" @bind="_errorsOnly" />
                                 Только ошибки
                             </label>
-                            <button type="button" class="bi-btn" @onclick="Refresh">Применить</button>
+                            <button type="button" class="bi-btn" @onclick="() => Refresh()">Применить</button>
                         </div>
                     </div>
 
@@ -197,6 +259,7 @@
 @code {
     private OperationalMetricsSnapshot? _metrics;
     private AuditLogSummary? _auditSummary;
+    private SecurityChecklist? _securityChecklist;
     private List<AuditLogEntry> _auditEntries = new();
     private List<string> _actions = new();
     private string _username = "";
@@ -205,6 +268,7 @@
     private string _actionFilter = "";
     private bool _errorsOnly;
     private string? _error;
+    private string? _notice;
 
     protected override async Task OnInitializedAsync()
     {
@@ -215,19 +279,38 @@
         Refresh();
     }
 
-    private void Refresh()
+    private void Refresh(bool clearNotice = true)
     {
         try
         {
             _error = null;
+            if (clearNotice)
+                _notice = null;
             _metrics = Metrics.GetSnapshot(_companyId);
             _auditSummary = Audit.GetSummary(_companyId);
+            _securityChecklist = SecurityChecklist.Get(_companyId);
             _actions = Audit.ListActions(_companyId).ToList();
             _auditEntries = Audit.List(
                 _companyId,
                 200,
                 string.IsNullOrWhiteSpace(_actionFilter) ? null : _actionFilter,
                 _errorsOnly).ToList();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private void RunRetention()
+    {
+        try
+        {
+            _error = null;
+            var result = Retention.Apply(_companyId);
+            Audit.Record(_companyId, null, _username, "retention.run", "retention", success: true, details: $"audit={result.DeletedAuditEvents}; reports={result.DeletedReports}");
+            _notice = $"Retention cleanup: audit {result.DeletedAuditEvents}, reports {result.DeletedReports}.";
+            Refresh(clearNotice: false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {

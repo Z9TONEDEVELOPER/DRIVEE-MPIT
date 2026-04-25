@@ -175,6 +175,23 @@ public sealed class AuditLogService
             ParseDate(lastEventAt));
     }
 
+    public int ApplyRetention(int companyId, int retentionDays)
+    {
+        if (retentionDays <= 0)
+            return 0;
+
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays).ToString("O");
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            DELETE FROM audit_log
+            WHERE company_id = $company_id
+              AND created_at < $cutoff;";
+        command.Parameters.AddWithValue("$company_id", companyId <= 0 ? CompanyDefaults.DefaultCompanyId : companyId);
+        command.Parameters.AddWithValue("$cutoff", cutoff);
+        return command.ExecuteNonQuery();
+    }
+
     private void EnsureSchema()
     {
         using var connection = OpenConnection();

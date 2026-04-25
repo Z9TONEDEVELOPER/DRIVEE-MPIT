@@ -2,8 +2,29 @@ namespace DriveeDataSpace.Core.Models;
 
 public static class AppRoles
 {
+    public const string Owner = "Owner";
     public const string Admin = "Admin";
-    public const string User = "User";
+    public const string Analyst = "Analyst";
+    public const string Viewer = "Viewer";
+    public const string User = Analyst;
+    public const string AdminAccess = Owner + "," + Admin;
+
+    public static IReadOnlyList<string> All { get; } = new[] { Owner, Admin, Analyst, Viewer };
+
+    public static string Normalize(string? role)
+    {
+        if (string.Equals(role, Owner, StringComparison.OrdinalIgnoreCase))
+            return Owner;
+        if (string.Equals(role, Admin, StringComparison.OrdinalIgnoreCase))
+            return Admin;
+        if (string.Equals(role, Viewer, StringComparison.OrdinalIgnoreCase))
+            return Viewer;
+        return Analyst;
+    }
+
+    public static bool CanAdminister(string? role) =>
+        string.Equals(role, Owner, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(role, Admin, StringComparison.OrdinalIgnoreCase);
 }
 
 public class AppUser
@@ -52,7 +73,13 @@ public sealed class Company
     public string Name { get; set; } = CompanyDefaults.DefaultCompanyName;
     public string Slug { get; set; } = "default";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public int UserCount { get; set; }
+    public int ActiveUserCount { get; set; }
+    public int DataSourceCount { get; set; }
+    public int VerifiedDataSourceCount { get; set; }
 }
+
+public sealed record UpdateCompanyRequest(string Name);
 
 public static class RegistrationRequestStatuses
 {

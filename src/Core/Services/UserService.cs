@@ -151,7 +151,15 @@ public sealed class UserService
             LEFT JOIN reports r ON r.company_id = u.company_id AND lower(r.author) = u.normalized_username
             WHERE u.company_id = $company_id
             GROUP BY u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at
-            ORDER BY CASE WHEN u.role = 'Admin' THEN 0 ELSE 1 END, u.display_name, u.username";
+            ORDER BY
+                CASE u.role
+                    WHEN 'Owner' THEN 0
+                    WHEN 'Admin' THEN 1
+                    WHEN 'Analyst' THEN 2
+                    ELSE 3
+                END,
+                u.display_name,
+                u.username";
         command.Parameters.AddWithValue("$company_id", companyId);
 
         using var reader = command.ExecuteReader();
@@ -227,6 +235,87 @@ public sealed class UserService
 
         detail.RecentReports = GetRecentReportsForAuthor(companyId, detail.Username, connection);
         return detail;
+    }
+
+    public Company GetCompany(int companyId)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            SELECT
+                c.id,
+                c.name,
+                c.slug,
+                c.created_at,
+                COUNT(DISTINCT u.id) AS user_count,
+                COUNT(DISTINCT CASE WHEN u.is_active = 1 THEN u.id END) AS active_user_count,
+                COUNT(DISTINCT ds.id) AS data_source_count,
+                COUNT(DISTINCT CASE WHEN ds.last_validated_at IS NOT NULL AND (ds.last_validation_error IS NULL OR ds.last_validation_error = '') THEN ds.id END) AS verified_data_source_count
+            FROM companies c
+            LEFT JOIN users u ON u.company_id = c.id
+            LEFT JOIN data_sources ds ON ds.company_id = c.id
+            WHERE c.id = $company_id
+            GROUP BY c.id, c.name, c.slug, c.created_at";
+        command.Parameters.AddWithValue("$company_id", companyId);
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+            throw new InvalidOperationException("Компания не найдена.");
+
+        return new Company
+        {
+            Id = reader.GetInt32(0),
+            Name = reader.GetString(1),
+            Slug = reader.GetString(2),
+            CreatedAt = ParseDateTime(reader.GetString(3)),
+            UserCount = Convert.ToInt32(reader.GetValue(4)),
+            ActiveUserCount = Convert.ToInt32(reader.GetValue(5)),
+            DataSourceCount = Convert.ToInt32(reader.GetValue(6)),
+            VerifiedDataSourceCount = Convert.ToInt32(reader.GetValue(7))
+        };
+    }
+
+    public Company UpdateCompany(int companyId, string name)
+    {
+        var normalizedName = NormalizeRequired(name, "Укажите название компании.");
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE companies SET name = $name WHERE id = $company_id";
+        command.Parameters.AddWithValue("$company_id", companyId);
+        command.Parameters.AddWithValue("$name", normalizedName);
+        if (command.ExecuteNonQuery() == 0)
+            throw new InvalidOperationException("Компания не найдена.");
+
+        return GetCompany(companyId);
+    }
+
+    public AppUserDetail UpdateUserRole(int companyId, int userId, string role)
+    {
+        var normalizedRole = AppRoles.Normalize(role);
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE users SET role = $role WHERE id = $id AND company_id = $company_id";
+        command.Parameters.AddWithValue("$id", userId);
+        command.Parameters.AddWithValue("$company_id", companyId);
+        command.Parameters.AddWithValue("$role", normalizedRole);
+        if (command.ExecuteNonQuery() == 0)
+            throw new InvalidOperationException("Пользователь не найден.");
+
+        return GetUserDetail(companyId, userId) ?? throw new InvalidOperationException("Пользователь не найден.");
+    }
+
+    public AppUserDetail SetUserActive(int companyId, int userId, bool isActive)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE users SET is_active = $is_active WHERE id = $id AND company_id = $company_id";
+        command.Parameters.AddWithValue("$id", userId);
+        command.Parameters.AddWithValue("$company_id", companyId);
+        command.Parameters.AddWithValue("$is_active", isActive ? 1 : 0);
+        if (command.ExecuteNonQuery() == 0)
+            throw new InvalidOperationException("Пользователь не найден.");
+
+        return GetUserDetail(companyId, userId) ?? throw new InvalidOperationException("Пользователь не найден.");
     }
 
     public RegistrationRequest SubmitRegistrationRequest(RegistrationRequestInput input)
@@ -601,9 +690,7 @@ public sealed class UserService
         var normalizedUsername = NormalizeUsername(seedUser.Username);
         var email = string.IsNullOrWhiteSpace(seedUser.Email) ? null : NormalizeEmail(seedUser.Email);
         var displayName = string.IsNullOrWhiteSpace(seedUser.DisplayName) ? seedUser.Username.Trim() : seedUser.DisplayName.Trim();
-        var role = string.Equals(seedUser.Role, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)
-            ? AppRoles.Admin
-            : AppRoles.User;
+        var role = AppRoles.Normalize(seedUser.Role);
         var companyName = string.IsNullOrWhiteSpace(seedUser.Company) ? CompanyDefaults.DefaultCompanyName : seedUser.Company.Trim();
 
         using var connection = OpenConnection();

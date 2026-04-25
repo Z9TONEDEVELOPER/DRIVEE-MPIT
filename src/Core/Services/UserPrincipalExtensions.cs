@@ -14,7 +14,7 @@ public static class UserPrincipalExtensions
         ?? "User";
 
     public static bool IsAdmin(this ClaimsPrincipal user) =>
-        user.IsInRole(AppRoles.Admin);
+        user.IsInRole(AppRoles.Owner) || user.IsInRole(AppRoles.Admin);
 
     public static int? GetUserId(this ClaimsPrincipal user)
     {

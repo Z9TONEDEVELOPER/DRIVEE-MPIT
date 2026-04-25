@@ -45,6 +45,7 @@ public class QueryExecutor
         if (!guardReport.Ok)
             throw new InvalidOperationException($"Guardrails: {guardReport.Reason}");
 
+        _dataSources.EnsureActiveSourceReadyForAnalytics();
         var activeDataSource = _dataSources.GetActive();
         var cacheKey = LoadCacheService.BuildQueryResultKey(
             _tenantContext.CompanyId,
@@ -62,11 +63,13 @@ public class QueryExecutor
             return cachedResult;
         }
 
+        using var sqlScope = _metrics.EnterSqlQueue();
         if (!_sqlSemaphore.Wait(_sqlQueueTimeout))
         {
             _metrics.RecordSqlExecution(_tenantContext.CompanyId, false, 0);
             throw new InvalidOperationException("Too many SQL queries are running. Try again in a few seconds.");
         }
+        sqlScope.MarkActive();
 
         var stopwatch = Stopwatch.StartNew();
         var success = false;
