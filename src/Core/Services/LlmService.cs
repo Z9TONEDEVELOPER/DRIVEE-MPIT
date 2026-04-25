@@ -41,8 +41,8 @@ public class LlmService
         _httpClient = httpClientFactory.CreateClient("llm");
         _settings = settings;
         _logger = logger;
-        _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/v1/chat/completions";
-        _model = configuration["Llm:Model"] ?? "qwen2.5-7b-instruct";
+        _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
+        _model = configuration["Llm:Model"] ?? "qwen2.5-coder-7b-instruct";
         _usesSimpleChatApi = _endpoint.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase);
         _maxHistoryTurns = ReadBoundedInt(configuration, "Llm:MaxHistoryTurns", 2, 0, 8);
         _maxOutputTokens = ReadBoundedInt(configuration, "Llm:MaxOutputTokens", 700, 128, 2_048);

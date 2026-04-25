@@ -8,6 +8,7 @@
 @using global::DriveeDataSpace.Web.Services
 @inject NlSqlEngine Engine
 @inject ReportService Reports
+@inject AuditLogService Audit
 @inject IJSRuntime JS
 @inject WorkspaceSessionState WorkspaceState
 @inject AuthenticationStateProvider AuthenticationStateProvider
@@ -34,15 +35,7 @@
             </form>
         </div>
 
-        <nav class="bi-nav">
-            <a class="bi-nav-link active" href="/"><span class="bi-nav-ico">◈</span> Workspace</a>
-            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
-            @if (_isAdmin)
-            {
-                <a class="bi-nav-link" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
-                <a class="bi-nav-link" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
-            }
-        </nav>
+        <SidebarNav Current="workspace" IsAdmin="_isAdmin" />
 
         <button class="bi-new-chat" @onclick="ClearChat">＋ Новый чат</button>
 
@@ -185,6 +178,8 @@
     private List<global::DriveeDataSpace.Core.Models.Report> _reports = new();
     private string _username = "";
     private string _displayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
+    private int? _userId;
     private bool _isAdmin;
     private bool _identityLoaded;
     private int? _openedReportId;
@@ -213,6 +208,8 @@
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
+        _userId = authState.User.GetUserId();
         _isAdmin = authState.User.IsAdmin();
         _identityLoaded = true;
         RefreshReports();
@@ -243,7 +240,7 @@
     private void RefreshReports() =>
         _reports = string.IsNullOrWhiteSpace(_username)
             ? new List<global::DriveeDataSpace.Core.Models.Report>()
-            : Reports.ListForAuthor(_username);
+            : Reports.ListForAuthor(_companyId, _username);
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
@@ -278,8 +275,9 @@
                 .Select(m => m.Result!.Intent)
                 .LastOrDefault();
 
-            var pr = await Engine.RunAsync(q, history, prevIntent);
+            var pr = await Engine.RunAsync(q, history, prevIntent, companyId: _companyId);
             pr.UserQuery = q;
+            Audit.Record(_companyId, _userId, _username, "query.run", "query", success: string.IsNullOrWhiteSpace(pr.Error), details: q);
 
             var msg = new WorkspaceChatMessage();
             if (pr.IsChat)
@@ -342,6 +340,7 @@
         var r = new Report
         {
             Name = string.IsNullOrWhiteSpace(m.ReportName) ? BuildReportName(m.Result) : m.ReportName.Trim(),
+            CompanyId = _companyId,
             UserQuery = m.Result.UserQuery,
             IntentJson = JsonSerializer.Serialize(m.Result.Intent),
             Sql = m.Result.Sql,
@@ -349,19 +348,21 @@
             Author = _username
         };
         var id = Reports.Save(r);
+        Audit.Record(_companyId, _userId, _username, "report.save", "report", id.ToString(), success: true);
         m.SavedAs = $"#{id}";
         RefreshReports();
     }
 
     private void OpenReport(int id)
     {
-        var r = Reports.GetForAuthor(id, _username, _isAdmin);
+        var r = Reports.GetForAuthor(_companyId, id, _username, _isAdmin);
         if (r == null) return;
         _messages.Add(new ChatMsg { Role = "user", Text = $"[↻ отчёт] {r.UserQuery}" });
         try
         {
-            var pr = Engine.ReplayFromReport(r.IntentJson);
+            var pr = Engine.ReplayFromReport(r.IntentJson, companyId: _companyId);
             pr.UserQuery = r.UserQuery;
+            Audit.Record(_companyId, _userId, _username, "report.rerun", "report", id.ToString(), success: true);
             _messages.Add(new ChatMsg
             {
                 Role = "result",
@@ -379,7 +380,8 @@
 
     private void DeleteReport(int id)
     {
-        Reports.DeleteForAuthor(id, _username, _isAdmin);
+        Reports.DeleteForAuthor(_companyId, id, _username, _isAdmin);
+        Audit.Record(_companyId, _userId, _username, "report.delete", "report", id.ToString(), success: true);
         RefreshReports();
     }
 

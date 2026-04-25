@@ -14,14 +14,18 @@ public sealed class DataSourceService
     private readonly string _dbPath;
     private readonly string _defaultAnalyticsDb;
     private readonly IHostEnvironment _environment;
+    private readonly TenantContext _tenantContext;
+    private readonly SecretProtector _secretProtector;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
 
-    public DataSourceService(IConfiguration configuration, IHostEnvironment environment)
+    public DataSourceService(IConfiguration configuration, IHostEnvironment environment, TenantContext tenantContext, SecretProtector secretProtector)
     {
         _environment = environment;
+        _tenantContext = tenantContext;
+        _secretProtector = secretProtector;
         _dbPath = DataPathResolver.Resolve(environment, configuration["Data:ReportsDb"], "Data/reports.db");
         _defaultAnalyticsDb = configuration["Data:AnalyticsDb"] ?? "Data/drivee.db";
 
@@ -33,55 +37,60 @@ public sealed class DataSourceService
         EnsureDefaultDataSource();
     }
 
-    public List<CompanyDataSource> List()
+    public List<CompanyDataSource> List(int? companyId = null)
     {
+        var tenantId = NormalizeCompanyId(companyId);
         using var connection = OpenMetadataConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, name, provider, connection_string, semantic_json, schema_json, is_builtin, is_active,
+            SELECT id, company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json, is_builtin, is_active,
                    created_at, updated_at, last_validated_at, last_validation_error
             FROM data_sources
+            WHERE company_id = $company_id
             ORDER BY is_active DESC, is_builtin DESC, name";
-        return ReadDataSources(command);
+        command.Parameters.AddWithValue("$company_id", tenantId);
+        return ReadDataSources(command, exposeSecret: false);
     }
 
-    public CompanyDataSource? Get(int id)
+    public CompanyDataSource? Get(int id, int? companyId = null)
     {
+        using var connection = OpenMetadataConnection();
+        return GetCore(connection, id, NormalizeCompanyId(companyId), exposeSecret: false);
+    }
+
+    private CompanyDataSource? GetForExecution(int id, int? companyId = null)
+    {
+        using var connection = OpenMetadataConnection();
+        return GetCore(connection, id, NormalizeCompanyId(companyId), exposeSecret: true);
+    }
+
+    public CompanyDataSource GetActive(int? companyId = null)
+    {
+        var tenantId = NormalizeCompanyId(companyId);
         using var connection = OpenMetadataConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, name, provider, connection_string, semantic_json, schema_json, is_builtin, is_active,
+            SELECT id, company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json, is_builtin, is_active,
                    created_at, updated_at, last_validated_at, last_validation_error
             FROM data_sources
-            WHERE id = $id";
-        command.Parameters.AddWithValue("$id", id);
-        return ReadDataSource(command);
-    }
-
-    public CompanyDataSource GetActive()
-    {
-        using var connection = OpenMetadataConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = @"
-            SELECT id, name, provider, connection_string, semantic_json, schema_json, is_builtin, is_active,
-                   created_at, updated_at, last_validated_at, last_validation_error
-            FROM data_sources
-            WHERE is_active = 1
+            WHERE company_id = $company_id AND is_active = 1
             ORDER BY is_builtin DESC, id
             LIMIT 1";
-        var active = ReadDataSource(command);
+        command.Parameters.AddWithValue("$company_id", tenantId);
+        var active = ReadDataSource(command, exposeSecret: true);
         if (active != null)
             return active;
 
-        EnsureDefaultDataSource();
-        return List().First(source => source.IsActive);
+        EnsureDefaultDataSource(tenantId);
+        return GetActive(tenantId);
     }
 
-    public int Save(DataSourceInput input)
+    public int Save(DataSourceInput input, int? companyId = null)
     {
+        var tenantId = NormalizeCompanyId(companyId);
         var name = Require(input.Name, "Укажите название источника данных.");
         var provider = NormalizeProvider(input.Provider);
-        var connectionString = Require(input.ConnectionString, "Укажите строку подключения.");
+        var connectionString = input.ConnectionString?.Trim() ?? "";
         var semanticJson = NormalizeSemanticJson(input.SemanticJson);
         var now = DateTime.UtcNow;
 
@@ -93,8 +102,16 @@ public sealed class DataSourceService
         {
             var existing = GetForUpdate(connection, transaction, input.Id.Value)
                 ?? throw new InvalidOperationException("Источник данных не найден.");
+            if (existing.CompanyId != tenantId)
+                throw new InvalidOperationException("Источник данных не найден в текущей компании.");
             if (existing.IsBuiltin)
                 throw new InvalidOperationException("Встроенный демо-источник нельзя перезаписать. Создайте новый источник компании.");
+
+            var secret = SecretProtector.IsMasked(connectionString) || string.IsNullOrWhiteSpace(connectionString)
+                ? existing.ConnectionString
+                : connectionString;
+            if (string.IsNullOrWhiteSpace(secret))
+                throw new InvalidOperationException("Укажите строку подключения.");
 
             using var update = connection.CreateCommand();
             update.Transaction = transaction;
@@ -102,14 +119,17 @@ public sealed class DataSourceService
                 UPDATE data_sources
                 SET name = $name,
                     provider = $provider,
-                    connection_string = $connection_string,
+                    connection_string = $connection_mask,
+                    connection_secret = $connection_secret,
                     semantic_json = $semantic_json,
                     updated_at = $updated_at
-                WHERE id = $id";
+                WHERE id = $id AND company_id = $company_id";
             update.Parameters.AddWithValue("$id", input.Id.Value);
+            update.Parameters.AddWithValue("$company_id", tenantId);
             update.Parameters.AddWithValue("$name", name);
             update.Parameters.AddWithValue("$provider", provider);
-            update.Parameters.AddWithValue("$connection_string", connectionString);
+            update.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(secret));
+            update.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(secret));
             update.Parameters.AddWithValue("$semantic_json", (object?)semanticJson ?? DBNull.Value);
             update.Parameters.AddWithValue("$updated_at", now.ToString("O"));
             update.ExecuteNonQuery();
@@ -117,19 +137,22 @@ public sealed class DataSourceService
         }
         else
         {
+            connectionString = Require(connectionString, "Укажите строку подключения.");
             using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = @"
                 INSERT INTO data_sources(
-                    name, provider, connection_string, semantic_json, schema_json,
+                    company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json,
                     is_builtin, is_active, created_at, updated_at)
                 VALUES(
-                    $name, $provider, $connection_string, $semantic_json, NULL,
+                    $company_id, $name, $provider, $connection_mask, $connection_secret, $semantic_json, NULL,
                     0, 0, $created_at, $updated_at);
                 SELECT last_insert_rowid();";
+            insert.Parameters.AddWithValue("$company_id", tenantId);
             insert.Parameters.AddWithValue("$name", name);
             insert.Parameters.AddWithValue("$provider", provider);
-            insert.Parameters.AddWithValue("$connection_string", connectionString);
+            insert.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(connectionString));
+            insert.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(connectionString));
             insert.Parameters.AddWithValue("$semantic_json", (object?)semanticJson ?? DBNull.Value);
             insert.Parameters.AddWithValue("$created_at", now.ToString("O"));
             insert.Parameters.AddWithValue("$updated_at", now.ToString("O"));
@@ -137,27 +160,31 @@ public sealed class DataSourceService
         }
 
         if (input.MakeActive)
-            ActivateCore(connection, transaction, id);
+            ActivateCore(connection, transaction, tenantId, id);
 
         transaction.Commit();
         return id;
     }
 
-    public void Activate(int id)
+    public void Activate(int id, int? companyId = null)
     {
+        var tenantId = NormalizeCompanyId(companyId);
         using var connection = OpenMetadataConnection();
         using var transaction = connection.BeginTransaction();
-        ActivateCore(connection, transaction, id);
+        ActivateCore(connection, transaction, tenantId, id);
         transaction.Commit();
     }
 
-    public void Delete(int id)
+    public void Delete(int id, int? companyId = null)
     {
+        var tenantId = NormalizeCompanyId(companyId);
         using var connection = OpenMetadataConnection();
         using var transaction = connection.BeginTransaction();
 
         var existing = GetForUpdate(connection, transaction, id)
             ?? throw new InvalidOperationException("Источник данных не найден.");
+        if (existing.CompanyId != tenantId)
+            throw new InvalidOperationException("Источник данных не найден в текущей компании.");
         if (existing.IsBuiltin)
             throw new InvalidOperationException("Встроенный демо-источник нельзя удалить.");
         if (existing.IsActive)
@@ -165,16 +192,17 @@ public sealed class DataSourceService
 
         using var delete = connection.CreateCommand();
         delete.Transaction = transaction;
-        delete.CommandText = "DELETE FROM data_sources WHERE id = $id";
+        delete.CommandText = "DELETE FROM data_sources WHERE id = $id AND company_id = $company_id";
         delete.Parameters.AddWithValue("$id", id);
+        delete.Parameters.AddWithValue("$company_id", tenantId);
         delete.ExecuteNonQuery();
 
         transaction.Commit();
     }
 
-    public DataSourceTestResult Test(int id)
+    public DataSourceTestResult Test(int id, int? companyId = null)
     {
-        var dataSource = Get(id) ?? throw new InvalidOperationException("Источник данных не найден.");
+        var dataSource = GetForExecution(id, companyId) ?? throw new InvalidOperationException("Источник данных не найден.");
         return Test(dataSource);
     }
 
@@ -201,9 +229,9 @@ public sealed class DataSourceService
         return result;
     }
 
-    public SchemaInspectionResult InspectSchema(int id)
+    public SchemaInspectionResult InspectSchema(int id, int? companyId = null)
     {
-        var dataSource = Get(id) ?? throw new InvalidOperationException("Источник данных не найден.");
+        var dataSource = GetForExecution(id, companyId) ?? throw new InvalidOperationException("Источник данных не найден.");
         if (string.Equals(dataSource.Provider, DataSourceProviders.PostgreSql, StringComparison.OrdinalIgnoreCase))
             return InspectPostgreSqlSchema(dataSource);
 
@@ -328,9 +356,9 @@ public sealed class DataSourceService
         return result;
     }
 
-    public string BuildSemanticDraftFromLastSchema(int id)
+    public string BuildSemanticDraftFromLastSchema(int id, int? companyId = null)
     {
-        var dataSource = Get(id) ?? throw new InvalidOperationException("Источник данных не найден.");
+        var dataSource = Get(id, companyId) ?? throw new InvalidOperationException("Источник данных не найден.");
         if (string.IsNullOrWhiteSpace(dataSource.SchemaJson))
             throw new InvalidOperationException("Сначала выполните анализ схемы.");
 
@@ -367,9 +395,11 @@ public sealed class DataSourceService
         command.CommandText = @"
             CREATE TABLE IF NOT EXISTS data_sources (
                 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id            INTEGER NOT NULL DEFAULT 1,
                 name                  TEXT NOT NULL,
                 provider              TEXT NOT NULL,
                 connection_string     TEXT NOT NULL,
+                connection_secret     TEXT NULL,
                 semantic_json         TEXT NULL,
                 schema_json           TEXT NULL,
                 is_builtin            INTEGER NOT NULL DEFAULT 0,
@@ -381,23 +411,28 @@ public sealed class DataSourceService
             );
 
             CREATE INDEX IF NOT EXISTS ix_data_sources_active
-                ON data_sources(is_active);";
+                ON data_sources(company_id, is_active);";
         command.ExecuteNonQuery();
 
+        EnsureColumn(connection, "data_sources", "company_id", "INTEGER NOT NULL DEFAULT 1");
         EnsureColumn(connection, "data_sources", "is_builtin", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "data_sources", "connection_secret", "TEXT NULL");
         EnsureColumn(connection, "data_sources", "schema_json", "TEXT NULL");
         EnsureColumn(connection, "data_sources", "last_validated_at", "TEXT NULL");
         EnsureColumn(connection, "data_sources", "last_validation_error", "TEXT NULL");
+        MigrateConnectionSecrets(connection);
     }
 
-    private void EnsureDefaultDataSource()
+    private void EnsureDefaultDataSource(int? companyId = null)
     {
+        var tenantId = NormalizeCompanyId(companyId);
         using var connection = OpenMetadataConnection();
         using var transaction = connection.BeginTransaction();
 
         using var existing = connection.CreateCommand();
         existing.Transaction = transaction;
-        existing.CommandText = "SELECT id FROM data_sources WHERE is_builtin = 1 LIMIT 1";
+        existing.CommandText = "SELECT id FROM data_sources WHERE company_id = $company_id AND is_builtin = 1 LIMIT 1";
+        existing.Parameters.AddWithValue("$company_id", tenantId);
         var existingId = existing.ExecuteScalar();
         if (existingId == null)
         {
@@ -405,14 +440,16 @@ public sealed class DataSourceService
             insert.Transaction = transaction;
             insert.CommandText = @"
                 INSERT INTO data_sources(
-                    name, provider, connection_string, semantic_json, schema_json,
+                    company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json,
                     is_builtin, is_active, created_at, updated_at)
                 VALUES(
-                    $name, $provider, $connection_string, NULL, NULL,
+                    $company_id, $name, $provider, $connection_mask, $connection_secret, NULL, NULL,
                     1, 1, $created_at, $updated_at)";
+            insert.Parameters.AddWithValue("$company_id", tenantId);
             insert.Parameters.AddWithValue("$name", "Drivee demo dataset");
             insert.Parameters.AddWithValue("$provider", DataSourceProviders.Sqlite);
-            insert.Parameters.AddWithValue("$connection_string", _defaultAnalyticsDb);
+            insert.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(_defaultAnalyticsDb));
+            insert.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(_defaultAnalyticsDb));
             insert.Parameters.AddWithValue("$created_at", DateTime.UtcNow.ToString("O"));
             insert.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
             insert.ExecuteNonQuery();
@@ -420,35 +457,41 @@ public sealed class DataSourceService
 
         using var anyActive = connection.CreateCommand();
         anyActive.Transaction = transaction;
-        anyActive.CommandText = "SELECT 1 FROM data_sources WHERE is_active = 1 LIMIT 1";
+        anyActive.CommandText = "SELECT 1 FROM data_sources WHERE company_id = $company_id AND is_active = 1 LIMIT 1";
+        anyActive.Parameters.AddWithValue("$company_id", tenantId);
         if (anyActive.ExecuteScalar() == null)
         {
             using var activate = connection.CreateCommand();
             activate.Transaction = transaction;
-            activate.CommandText = "UPDATE data_sources SET is_active = CASE WHEN is_builtin = 1 THEN 1 ELSE 0 END";
+            activate.CommandText = "UPDATE data_sources SET is_active = CASE WHEN is_builtin = 1 THEN 1 ELSE 0 END WHERE company_id = $company_id";
+            activate.Parameters.AddWithValue("$company_id", tenantId);
             activate.ExecuteNonQuery();
         }
 
         transaction.Commit();
     }
 
-    private void ActivateCore(SqliteConnection connection, SqliteTransaction transaction, int id)
+    private void ActivateCore(SqliteConnection connection, SqliteTransaction transaction, int companyId, int id)
     {
         var dataSource = GetForUpdate(connection, transaction, id)
             ?? throw new InvalidOperationException("Источник данных не найден.");
+        if (dataSource.CompanyId != companyId)
+            throw new InvalidOperationException("Источник данных не найден в текущей компании.");
 
         if (!dataSource.IsBuiltin && string.IsNullOrWhiteSpace(dataSource.SemanticJson))
             throw new InvalidOperationException("Перед активацией заполните semantic layer: метрики, таблицы, поля, фильтры и группировки.");
 
         using var deactivate = connection.CreateCommand();
         deactivate.Transaction = transaction;
-        deactivate.CommandText = "UPDATE data_sources SET is_active = 0";
+        deactivate.CommandText = "UPDATE data_sources SET is_active = 0 WHERE company_id = $company_id";
+        deactivate.Parameters.AddWithValue("$company_id", companyId);
         deactivate.ExecuteNonQuery();
 
         using var activate = connection.CreateCommand();
         activate.Transaction = transaction;
-        activate.CommandText = "UPDATE data_sources SET is_active = 1, updated_at = $updated_at WHERE id = $id";
+        activate.CommandText = "UPDATE data_sources SET is_active = 1, updated_at = $updated_at WHERE id = $id AND company_id = $company_id";
         activate.Parameters.AddWithValue("$id", id);
+        activate.Parameters.AddWithValue("$company_id", companyId);
         activate.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
         activate.ExecuteNonQuery();
     }
@@ -764,6 +807,10 @@ public sealed class DataSourceService
         using var timeout = connection.CreateCommand();
         timeout.CommandText = $"PRAGMA busy_timeout = {BusyTimeoutMs};";
         timeout.ExecuteNonQuery();
+
+        using var queryOnly = connection.CreateCommand();
+        queryOnly.CommandText = "PRAGMA query_only = ON;";
+        queryOnly.ExecuteNonQuery();
         return connection;
     }
 
@@ -841,50 +888,106 @@ public sealed class DataSourceService
         command.ExecuteNonQuery();
     }
 
+    private void MigrateConnectionSecrets(SqliteConnection connection)
+    {
+        using var select = connection.CreateCommand();
+        select.CommandText = @"
+            SELECT id, connection_string, connection_secret
+            FROM data_sources
+            WHERE connection_secret IS NULL OR connection_secret = ''";
+
+        var rows = new List<(int Id, string ConnectionString)>();
+        using (var reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+                rows.Add((reader.GetInt32(0), reader.GetString(1)));
+        }
+
+        foreach (var row in rows)
+        {
+            using var update = connection.CreateCommand();
+            update.CommandText = @"
+                UPDATE data_sources
+                SET connection_string = $connection_mask,
+                    connection_secret = $connection_secret
+                WHERE id = $id";
+            update.Parameters.AddWithValue("$id", row.Id);
+            update.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(row.ConnectionString));
+            update.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(row.ConnectionString));
+            update.ExecuteNonQuery();
+        }
+    }
+
+    private int NormalizeCompanyId(int? companyId) =>
+        (companyId ?? _tenantContext.CompanyId) <= 0 ? CompanyDefaults.DefaultCompanyId : (companyId ?? _tenantContext.CompanyId);
+
     private CompanyDataSource? GetForUpdate(SqliteConnection connection, SqliteTransaction transaction, int id)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-            SELECT id, name, provider, connection_string, semantic_json, schema_json, is_builtin, is_active,
+            SELECT id, company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json, is_builtin, is_active,
                    created_at, updated_at, last_validated_at, last_validation_error
             FROM data_sources
             WHERE id = $id";
         command.Parameters.AddWithValue("$id", id);
-        return ReadDataSource(command);
+        return ReadDataSource(command, exposeSecret: true);
     }
 
-    private static List<CompanyDataSource> ReadDataSources(SqliteCommand command)
+    private CompanyDataSource? GetCore(SqliteConnection connection, int id, int companyId, bool exposeSecret)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            SELECT id, company_id, name, provider, connection_string, connection_secret, semantic_json, schema_json, is_builtin, is_active,
+                   created_at, updated_at, last_validated_at, last_validation_error
+            FROM data_sources
+            WHERE id = $id AND company_id = $company_id";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$company_id", companyId);
+        return ReadDataSource(command, exposeSecret);
+    }
+
+    private List<CompanyDataSource> ReadDataSources(SqliteCommand command, bool exposeSecret)
     {
         var items = new List<CompanyDataSource>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            items.Add(ReadDataSource(reader));
+            items.Add(ReadDataSource(reader, exposeSecret));
         return items;
     }
 
-    private static CompanyDataSource? ReadDataSource(SqliteCommand command)
+    private CompanyDataSource? ReadDataSource(SqliteCommand command, bool exposeSecret)
     {
         using var reader = command.ExecuteReader();
-        return reader.Read() ? ReadDataSource(reader) : null;
+        return reader.Read() ? ReadDataSource(reader, exposeSecret) : null;
     }
 
-    private static CompanyDataSource ReadDataSource(SqliteDataReader reader) =>
-        new()
+    private CompanyDataSource ReadDataSource(SqliteDataReader reader, bool exposeSecret)
+    {
+        var connectionMask = reader.GetString(4);
+        var protectedSecret = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var clearConnectionString = string.IsNullOrWhiteSpace(protectedSecret)
+            ? connectionMask
+            : _secretProtector.Unprotect(protectedSecret);
+
+        return new CompanyDataSource
         {
             Id = reader.GetInt32(0),
-            Name = reader.GetString(1),
-            Provider = reader.GetString(2),
-            ConnectionString = reader.GetString(3),
-            SemanticJson = reader.IsDBNull(4) ? null : reader.GetString(4),
-            SchemaJson = reader.IsDBNull(5) ? null : reader.GetString(5),
-            IsBuiltin = reader.GetInt64(6) == 1,
-            IsActive = reader.GetInt64(7) == 1,
-            CreatedAt = ParseDateTime(reader.GetString(8)),
-            UpdatedAt = ParseDateTime(reader.GetString(9)),
-            LastValidatedAt = reader.IsDBNull(10) ? null : ParseDateTime(reader.GetString(10)),
-            LastValidationError = reader.IsDBNull(11) ? null : reader.GetString(11)
+            CompanyId = reader.GetInt32(1),
+            Name = reader.GetString(2),
+            Provider = reader.GetString(3),
+            ConnectionString = exposeSecret ? clearConnectionString : SecretProtector.MaskConnectionString(clearConnectionString),
+            IsConnectionStringMasked = !exposeSecret,
+            SemanticJson = reader.IsDBNull(6) ? null : reader.GetString(6),
+            SchemaJson = reader.IsDBNull(7) ? null : reader.GetString(7),
+            IsBuiltin = reader.GetInt64(8) == 1,
+            IsActive = reader.GetInt64(9) == 1,
+            CreatedAt = ParseDateTime(reader.GetString(10)),
+            UpdatedAt = ParseDateTime(reader.GetString(11)),
+            LastValidatedAt = reader.IsDBNull(12) ? null : ParseDateTime(reader.GetString(12)),
+            LastValidationError = reader.IsDBNull(13) ? null : reader.GetString(13)
         };
+    }
 
     private SqliteConnection OpenMetadataConnection()
     {

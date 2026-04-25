@@ -21,6 +21,7 @@ public sealed record AuthSession(
 
 public sealed record AuthUserSession(
     int Id,
+    int CompanyId,
     string Username,
     string DisplayName,
     string Role,

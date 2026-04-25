@@ -12,10 +12,12 @@ public sealed class LlmSettingsService
 
     private readonly IConfiguration _configuration;
     private readonly string _dbPath;
+    private readonly TenantContext _tenantContext;
 
-    public LlmSettingsService(IConfiguration configuration, IHostEnvironment environment)
+    public LlmSettingsService(IConfiguration configuration, IHostEnvironment environment, TenantContext tenantContext)
     {
         _configuration = configuration;
+        _tenantContext = tenantContext;
         _dbPath = DataPathResolver.Resolve(environment, configuration["Data:ReportsDb"], "Data/reports.db");
 
         var directory = Path.GetDirectoryName(_dbPath);
@@ -26,8 +28,14 @@ public sealed class LlmSettingsService
     }
 
     public LlmSettings Get()
+        => Get(_tenantContext.CompanyId);
+
+    public LlmSettings Get(int companyId)
     {
-        var stored = ReadSetting(ProviderKey);
+        var stored = ReadSetting(ScopedKey(companyId, ProviderKey));
+        if (stored.Value == null && NormalizeCompanyId(companyId) == CompanyDefaults.DefaultCompanyId)
+            stored = ReadSetting(ProviderKey);
+
         var provider = LlmProviders.Normalize(stored.Value ?? _configuration["Llm:Provider"]);
         return BuildSettings(provider, stored.UpdatedAt ?? DateTime.UtcNow);
     }
@@ -35,6 +43,9 @@ public sealed class LlmSettingsService
     public string GetProvider() => Get().Provider;
 
     public LlmSettings SetProvider(string? provider)
+        => SetProvider(provider, _tenantContext.CompanyId);
+
+    public LlmSettings SetProvider(string? provider, int companyId)
     {
         var normalized = LlmProviders.Normalize(provider);
         if (string.Equals(normalized, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) &&
@@ -53,7 +64,7 @@ public sealed class LlmSettingsService
             ON CONFLICT(key) DO UPDATE SET
                 value = excluded.value,
                 updated_at = excluded.updated_at;";
-        command.Parameters.AddWithValue("$key", ProviderKey);
+        command.Parameters.AddWithValue("$key", ScopedKey(companyId, ProviderKey));
         command.Parameters.AddWithValue("$value", normalized);
         command.Parameters.AddWithValue("$updated_at", now.ToString("O"));
         command.ExecuteNonQuery();
@@ -64,8 +75,8 @@ public sealed class LlmSettingsService
     private LlmSettings BuildSettings(string provider, DateTime updatedAt) =>
         new(
             provider,
-            _configuration["Llm:Endpoint"] ?? "http://localhost:1234/v1/chat/completions",
-            _configuration["Llm:Model"] ?? "qwen2.5-7b-instruct",
+            _configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat",
+            _configuration["Llm:Model"] ?? "qwen2.5-coder-7b-instruct",
             _configuration["Llm:Fallback:GigaChat:Model"] ?? "GigaChat",
             !string.IsNullOrWhiteSpace(_configuration["Llm:Fallback:GigaChat:AuthorizationKey"]),
             updatedAt);
@@ -87,6 +98,12 @@ public sealed class LlmSettingsService
             : parsed;
         return (value, updatedAt);
     }
+
+    private static int NormalizeCompanyId(int companyId) =>
+        companyId <= 0 ? CompanyDefaults.DefaultCompanyId : companyId;
+
+    private static string ScopedKey(int companyId, string key) =>
+        $"company:{NormalizeCompanyId(companyId)}:{key}";
 
     private void EnsureSchema()
     {

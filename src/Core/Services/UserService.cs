@@ -13,6 +13,8 @@ public sealed class UserService
     private const int KeySize = 32;
     private const int Iterations = 100_000;
     private const int BusyTimeoutMs = 5_000;
+    private const int MaxFailedLoginAttempts = 5;
+    private static readonly TimeSpan LoginLockoutDuration = TimeSpan.FromMinutes(10);
 
     private readonly string _dbPath;
     private readonly List<SeedUserOptions> _seedUsers;
@@ -42,14 +44,18 @@ public sealed class UserService
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, username, email, display_name, role, is_active, created_at, last_login_at, password_hash, password_salt
-            FROM users
-            WHERE normalized_username = $username OR normalized_email = $username";
+            SELECT u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at,
+                   u.password_hash, u.password_salt, u.failed_login_count, u.lockout_until
+            FROM users u
+            JOIN companies c ON c.id = u.company_id
+            WHERE u.normalized_username = $username OR u.normalized_email = $username";
         command.Parameters.AddWithValue("$username", NormalizeUsername(username));
 
         AppUser user;
         string storedHash;
         string storedSalt;
+        var failedLoginCount = 0;
+        DateTime? lockoutUntil = null;
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read())
@@ -63,12 +69,20 @@ public sealed class UserService
                 return null;
             }
 
-            storedHash = reader.GetString(8);
-            storedSalt = reader.GetString(9);
+            storedHash = reader.GetString(10);
+            storedSalt = reader.GetString(11);
+            failedLoginCount = reader.IsDBNull(12) ? 0 : reader.GetInt32(12);
+            lockoutUntil = reader.IsDBNull(13) ? null : ParseDateTime(reader.GetString(13));
+        }
+
+        if (lockoutUntil.HasValue && lockoutUntil.Value > DateTime.UtcNow)
+        {
+            return null;
         }
 
         if (!VerifyPassword(password, storedSalt, storedHash))
         {
+            RecordFailedLogin(connection, user.Id, failedLoginCount);
             return null;
         }
 
@@ -83,9 +97,10 @@ public sealed class UserService
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, username, email, display_name, role, is_active, created_at, last_login_at
-            FROM users
-            WHERE id = $id";
+            SELECT u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at
+            FROM users u
+            JOIN companies c ON c.id = u.company_id
+            WHERE u.id = $id";
         command.Parameters.AddWithValue("$id", id);
 
         using var reader = command.ExecuteReader();
@@ -102,16 +117,17 @@ public sealed class UserService
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, username, email, display_name, role, is_active, created_at, last_login_at
-            FROM users
-            WHERE normalized_username = $username OR normalized_email = $username";
+            SELECT u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at
+            FROM users u
+            JOIN companies c ON c.id = u.company_id
+            WHERE u.normalized_username = $username OR u.normalized_email = $username";
         command.Parameters.AddWithValue("$username", NormalizeUsername(username));
 
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadUser(reader) : null;
     }
 
-    public List<AppUserSummary> ListUsers()
+    public List<AppUserSummary> ListUsers(int companyId)
     {
         var users = new List<AppUserSummary>();
 
@@ -120,6 +136,8 @@ public sealed class UserService
         command.CommandText = @"
             SELECT
                 u.id,
+                u.company_id,
+                c.name AS company_name,
                 u.username,
                 u.email,
                 u.display_name,
@@ -129,9 +147,12 @@ public sealed class UserService
                 u.last_login_at,
                 COUNT(r.id) AS report_count
             FROM users u
-            LEFT JOIN reports r ON lower(r.author) = u.normalized_username
-            GROUP BY u.id, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at
+            JOIN companies c ON c.id = u.company_id
+            LEFT JOIN reports r ON r.company_id = u.company_id AND lower(r.author) = u.normalized_username
+            WHERE u.company_id = $company_id
+            GROUP BY u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at
             ORDER BY CASE WHEN u.role = 'Admin' THEN 0 ELSE 1 END, u.display_name, u.username";
+        command.Parameters.AddWithValue("$company_id", companyId);
 
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -139,27 +160,31 @@ public sealed class UserService
             users.Add(new AppUserSummary
             {
                 Id = reader.GetInt32(0),
-                Username = reader.GetString(1),
-                Email = reader.IsDBNull(2) ? null : reader.GetString(2),
-                DisplayName = reader.GetString(3),
-                Role = reader.GetString(4),
-                IsActive = reader.GetInt64(5) == 1,
-                CreatedAt = ParseDateTime(reader.GetString(6)),
-                LastLoginAt = reader.IsDBNull(7) ? null : ParseDateTime(reader.GetString(7)),
-                ReportCount = reader.GetInt32(8)
+                CompanyId = reader.GetInt32(1),
+                CompanyName = reader.GetString(2),
+                Username = reader.GetString(3),
+                Email = reader.IsDBNull(4) ? null : reader.GetString(4),
+                DisplayName = reader.GetString(5),
+                Role = reader.GetString(6),
+                IsActive = reader.GetInt64(7) == 1,
+                CreatedAt = ParseDateTime(reader.GetString(8)),
+                LastLoginAt = reader.IsDBNull(9) ? null : ParseDateTime(reader.GetString(9)),
+                ReportCount = reader.GetInt32(10)
             });
         }
 
         return users;
     }
 
-    public AppUserDetail? GetUserDetail(int id)
+    public AppUserDetail? GetUserDetail(int companyId, int id)
     {
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = @"
             SELECT
                 u.id,
+                u.company_id,
+                c.name AS company_name,
                 u.username,
                 u.email,
                 u.display_name,
@@ -169,10 +194,12 @@ public sealed class UserService
                 u.last_login_at,
                 COUNT(r.id) AS report_count
             FROM users u
-            LEFT JOIN reports r ON lower(r.author) = u.normalized_username
-            WHERE u.id = $id
-            GROUP BY u.id, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at";
+            JOIN companies c ON c.id = u.company_id
+            LEFT JOIN reports r ON r.company_id = u.company_id AND lower(r.author) = u.normalized_username
+            WHERE u.id = $id AND u.company_id = $company_id
+            GROUP BY u.id, u.company_id, c.name, u.username, u.email, u.display_name, u.role, u.is_active, u.created_at, u.last_login_at";
         command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$company_id", companyId);
 
         AppUserDetail detail;
         using (var reader = command.ExecuteReader())
@@ -185,18 +212,20 @@ public sealed class UserService
             detail = new AppUserDetail
             {
                 Id = reader.GetInt32(0),
-                Username = reader.GetString(1),
-                Email = reader.IsDBNull(2) ? null : reader.GetString(2),
-                DisplayName = reader.GetString(3),
-                Role = reader.GetString(4),
-                IsActive = reader.GetInt64(5) == 1,
-                CreatedAt = ParseDateTime(reader.GetString(6)),
-                LastLoginAt = reader.IsDBNull(7) ? null : ParseDateTime(reader.GetString(7)),
-                ReportCount = reader.GetInt32(8)
+                CompanyId = reader.GetInt32(1),
+                CompanyName = reader.GetString(2),
+                Username = reader.GetString(3),
+                Email = reader.IsDBNull(4) ? null : reader.GetString(4),
+                DisplayName = reader.GetString(5),
+                Role = reader.GetString(6),
+                IsActive = reader.GetInt64(7) == 1,
+                CreatedAt = ParseDateTime(reader.GetString(8)),
+                LastLoginAt = reader.IsDBNull(9) ? null : ParseDateTime(reader.GetString(9)),
+                ReportCount = reader.GetInt32(10)
             };
         }
 
-        detail.RecentReports = GetRecentReportsForAuthor(detail.Username, connection);
+        detail.RecentReports = GetRecentReportsForAuthor(companyId, detail.Username, connection);
         return detail;
     }
 
@@ -225,6 +254,7 @@ public sealed class UserService
         insert.Transaction = transaction;
         insert.CommandText = @"
             INSERT INTO registration_requests(
+                company_id,
                 email,
                 normalized_email,
                 display_name,
@@ -235,6 +265,7 @@ public sealed class UserService
                 status,
                 created_at)
             VALUES(
+                $company_id,
                 $email,
                 $normalized_email,
                 $display_name,
@@ -246,6 +277,7 @@ public sealed class UserService
                 $created_at);
             SELECT last_insert_rowid();";
         insert.Parameters.AddWithValue("$email", email);
+        insert.Parameters.AddWithValue("$company_id", CompanyDefaults.DefaultCompanyId);
         insert.Parameters.AddWithValue("$normalized_email", email);
         insert.Parameters.AddWithValue("$display_name", displayName);
         insert.Parameters.AddWithValue("$organization", organization);
@@ -261,6 +293,8 @@ public sealed class UserService
         return new RegistrationRequest
         {
             Id = id,
+            CompanyId = CompanyDefaults.DefaultCompanyId,
+            CompanyName = CompanyDefaults.DefaultCompanyName,
             Email = email,
             DisplayName = displayName,
             Organization = organization,
@@ -270,7 +304,7 @@ public sealed class UserService
         };
     }
 
-    public List<RegistrationRequest> ListRegistrationRequests(string? status = null)
+    public List<RegistrationRequest> ListRegistrationRequests(int companyId, string? status = null)
     {
         var requests = new List<RegistrationRequest>();
 
@@ -279,6 +313,8 @@ public sealed class UserService
         command.CommandText = @"
             SELECT
                 rr.id,
+                rr.company_id,
+                company.name,
                 rr.email,
                 rr.display_name,
                 rr.organization,
@@ -290,8 +326,10 @@ public sealed class UserService
                 rr.reviewed_by_user_id,
                 reviewer.display_name
             FROM registration_requests rr
+            JOIN companies company ON company.id = rr.company_id
             LEFT JOIN users reviewer ON reviewer.id = rr.reviewed_by_user_id
-            WHERE $status IS NULL OR rr.status = $status
+            WHERE rr.company_id = $company_id
+              AND ($status IS NULL OR rr.status = $status)
             ORDER BY
                 CASE rr.status
                     WHEN 'Pending' THEN 0
@@ -300,6 +338,7 @@ public sealed class UserService
                 END,
                 rr.created_at DESC";
         command.Parameters.AddWithValue("$status", string.IsNullOrWhiteSpace(status) ? DBNull.Value : status);
+        command.Parameters.AddWithValue("$company_id", companyId);
 
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -308,12 +347,12 @@ public sealed class UserService
         return requests;
     }
 
-    public RegistrationDecisionResult ApproveRegistrationRequest(int requestId, int adminUserId)
+    public RegistrationDecisionResult ApproveRegistrationRequest(int companyId, int requestId, int adminUserId)
     {
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
 
-        var pending = GetPendingRegistrationRequestForUpdate(connection, transaction, requestId);
+        var pending = GetPendingRegistrationRequestForUpdate(connection, transaction, companyId, requestId);
         if (pending == null)
             throw new InvalidOperationException("Заявка не найдена или уже обработана.");
 
@@ -326,6 +365,7 @@ public sealed class UserService
         insertUser.CommandText = @"
             INSERT INTO users(
                 username,
+                company_id,
                 normalized_username,
                 email,
                 normalized_email,
@@ -337,6 +377,7 @@ public sealed class UserService
                 created_at)
             VALUES(
                 $username,
+                $company_id,
                 $normalized_username,
                 $email,
                 $normalized_email,
@@ -348,6 +389,7 @@ public sealed class UserService
                 $created_at);
             SELECT last_insert_rowid();";
         insertUser.Parameters.AddWithValue("$username", pending.Email);
+        insertUser.Parameters.AddWithValue("$company_id", companyId);
         insertUser.Parameters.AddWithValue("$normalized_username", pending.NormalizedEmail);
         insertUser.Parameters.AddWithValue("$email", pending.Email);
         insertUser.Parameters.AddWithValue("$normalized_email", pending.NormalizedEmail);
@@ -377,6 +419,8 @@ public sealed class UserService
         var user = new AppUser
         {
             Id = userId,
+            CompanyId = companyId,
+            CompanyName = pending.CompanyName,
             Username = pending.Email,
             Email = pending.Email,
             DisplayName = pending.DisplayName,
@@ -388,12 +432,12 @@ public sealed class UserService
         return new RegistrationDecisionResult(request, user);
     }
 
-    public RegistrationDecisionResult RejectRegistrationRequest(int requestId, int adminUserId, string? reason)
+    public RegistrationDecisionResult RejectRegistrationRequest(int companyId, int requestId, int adminUserId, string? reason)
     {
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
 
-        var pending = GetPendingRegistrationRequestForUpdate(connection, transaction, requestId);
+        var pending = GetPendingRegistrationRequestForUpdate(connection, transaction, companyId, requestId);
         if (pending == null)
             throw new InvalidOperationException("Заявка не найдена или уже обработана.");
 
@@ -425,8 +469,16 @@ public sealed class UserService
         EnsurePragmas(connection);
         using var command = connection.CreateCommand();
         command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS companies (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                slug       TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id          INTEGER NOT NULL DEFAULT 1,
                 username            TEXT NOT NULL,
                 normalized_username TEXT NOT NULL UNIQUE,
                 display_name        TEXT NOT NULL,
@@ -434,8 +486,11 @@ public sealed class UserService
                 password_hash       TEXT NOT NULL,
                 password_salt       TEXT NOT NULL,
                 is_active           INTEGER NOT NULL DEFAULT 1,
+                failed_login_count  INTEGER NOT NULL DEFAULT 0,
+                lockout_until       TEXT NULL,
                 created_at          TEXT NOT NULL,
-                last_login_at       TEXT NULL
+                last_login_at       TEXT NULL,
+                FOREIGN KEY(company_id) REFERENCES companies(id)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username
@@ -443,6 +498,7 @@ public sealed class UserService
 
             CREATE TABLE IF NOT EXISTS registration_requests (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id           INTEGER NOT NULL DEFAULT 1,
                 email                TEXT NOT NULL,
                 normalized_email     TEXT NOT NULL,
                 display_name         TEXT NOT NULL,
@@ -455,7 +511,8 @@ public sealed class UserService
                 created_at           TEXT NOT NULL,
                 reviewed_at          TEXT NULL,
                 reviewed_by_user_id  INTEGER NULL,
-                FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id)
+                FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id),
+                FOREIGN KEY(company_id) REFERENCES companies(id)
             );
 
             CREATE INDEX IF NOT EXISTS ix_registration_requests_status
@@ -466,8 +523,14 @@ public sealed class UserService
                 WHERE status = 'Pending';";
         command.ExecuteNonQuery();
 
+        EnsureDefaultCompany(connection);
+
+        EnsureColumn(connection, "users", "company_id", "INTEGER NOT NULL DEFAULT 1");
         EnsureColumn(connection, "users", "email", "TEXT NULL");
         EnsureColumn(connection, "users", "normalized_email", "TEXT NULL");
+        EnsureColumn(connection, "users", "failed_login_count", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "users", "lockout_until", "TEXT NULL");
+        EnsureColumn(connection, "registration_requests", "company_id", "INTEGER NOT NULL DEFAULT 1");
 
         using var emailIndex = connection.CreateCommand();
         emailIndex.CommandText = @"
@@ -475,6 +538,54 @@ public sealed class UserService
                 ON users(normalized_email)
                 WHERE normalized_email IS NOT NULL AND normalized_email <> '';";
         emailIndex.ExecuteNonQuery();
+
+        using var userCompanyIndex = connection.CreateCommand();
+        userCompanyIndex.CommandText = "CREATE INDEX IF NOT EXISTS ix_users_company ON users(company_id, role, display_name);";
+        userCompanyIndex.ExecuteNonQuery();
+
+        using var requestCompanyIndex = connection.CreateCommand();
+        requestCompanyIndex.CommandText = "CREATE INDEX IF NOT EXISTS ix_registration_requests_company_status ON registration_requests(company_id, status, created_at);";
+        requestCompanyIndex.ExecuteNonQuery();
+    }
+
+    private static void EnsureDefaultCompany(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT OR IGNORE INTO companies(id, name, slug, created_at)
+            VALUES($id, $name, $slug, $created_at);";
+        command.Parameters.AddWithValue("$id", CompanyDefaults.DefaultCompanyId);
+        command.Parameters.AddWithValue("$name", CompanyDefaults.DefaultCompanyName);
+        command.Parameters.AddWithValue("$slug", "default");
+        command.Parameters.AddWithValue("$created_at", DateTime.UtcNow.ToString("O"));
+        command.ExecuteNonQuery();
+    }
+
+    private static int EnsureCompany(SqliteConnection connection, SqliteTransaction transaction, string name)
+    {
+        var normalizedName = string.IsNullOrWhiteSpace(name) ? CompanyDefaults.DefaultCompanyName : name.Trim();
+        var slug = NormalizeCompanySlug(normalizedName);
+
+        using (var lookup = connection.CreateCommand())
+        {
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT id FROM companies WHERE slug = $slug";
+            lookup.Parameters.AddWithValue("$slug", slug);
+            var existing = lookup.ExecuteScalar();
+            if (existing != null)
+                return Convert.ToInt32(existing);
+        }
+
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = @"
+            INSERT INTO companies(name, slug, created_at)
+            VALUES($name, $slug, $created_at);
+            SELECT last_insert_rowid();";
+        insert.Parameters.AddWithValue("$name", normalizedName);
+        insert.Parameters.AddWithValue("$slug", slug);
+        insert.Parameters.AddWithValue("$created_at", DateTime.UtcNow.ToString("O"));
+        return Convert.ToInt32(insert.ExecuteScalar());
     }
 
     private void EnsureSeedUsers()
@@ -493,9 +604,11 @@ public sealed class UserService
         var role = string.Equals(seedUser.Role, AppRoles.Admin, StringComparison.OrdinalIgnoreCase)
             ? AppRoles.Admin
             : AppRoles.User;
+        var companyName = string.IsNullOrWhiteSpace(seedUser.Company) ? CompanyDefaults.DefaultCompanyName : seedUser.Company.Trim();
 
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
+        var companyId = EnsureCompany(connection, transaction, companyName);
 
         using var lookup = connection.CreateCommand();
         lookup.Transaction = transaction;
@@ -512,6 +625,7 @@ public sealed class UserService
             update.CommandText = @"
                 UPDATE users
                 SET username = $plain_username,
+                    company_id = $company_id,
                     email = $email,
                     normalized_email = $normalized_email,
                     display_name = $display_name,
@@ -521,6 +635,7 @@ public sealed class UserService
                     is_active = 1
                 WHERE id = $id";
             update.Parameters.AddWithValue("$id", existingId.Value);
+            update.Parameters.AddWithValue("$company_id", companyId);
             update.Parameters.AddWithValue("$plain_username", seedUser.Username.Trim());
             update.Parameters.AddWithValue("$email", (object?)email ?? DBNull.Value);
             update.Parameters.AddWithValue("$normalized_email", (object?)email ?? DBNull.Value);
@@ -535,9 +650,10 @@ public sealed class UserService
             using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = @"
-                INSERT INTO users(username, normalized_username, email, normalized_email, display_name, role, password_hash, password_salt, is_active, created_at)
-                VALUES($plain_username, $normalized_username, $email, $normalized_email, $display_name, $role, $password_hash, $password_salt, 1, $created_at)";
+                INSERT INTO users(username, company_id, normalized_username, email, normalized_email, display_name, role, password_hash, password_salt, is_active, created_at)
+                VALUES($plain_username, $company_id, $normalized_username, $email, $normalized_email, $display_name, $role, $password_hash, $password_salt, 1, $created_at)";
             insert.Parameters.AddWithValue("$plain_username", seedUser.Username.Trim());
+            insert.Parameters.AddWithValue("$company_id", companyId);
             insert.Parameters.AddWithValue("$normalized_username", normalizedUsername);
             insert.Parameters.AddWithValue("$email", (object?)email ?? DBNull.Value);
             insert.Parameters.AddWithValue("$normalized_email", (object?)email ?? DBNull.Value);
@@ -554,6 +670,8 @@ public sealed class UserService
 
     private sealed record PendingRegistrationRequest(
         int Id,
+        int CompanyId,
+        string CompanyName,
         string Email,
         string NormalizedEmail,
         string DisplayName,
@@ -567,6 +685,8 @@ public sealed class UserService
             new()
             {
                 Id = Id,
+                CompanyId = CompanyId,
+                CompanyName = CompanyName,
                 Email = Email,
                 DisplayName = DisplayName,
                 Organization = Organization,
@@ -582,15 +702,18 @@ public sealed class UserService
     private static PendingRegistrationRequest? GetPendingRegistrationRequestForUpdate(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        int companyId,
         int requestId)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-            SELECT id, email, normalized_email, display_name, organization, comment, password_hash, password_salt, created_at
-            FROM registration_requests
-            WHERE id = $id AND status = $status";
+            SELECT rr.id, rr.company_id, company.name, rr.email, rr.normalized_email, rr.display_name, rr.organization, rr.comment, rr.password_hash, rr.password_salt, rr.created_at
+            FROM registration_requests rr
+            JOIN companies company ON company.id = rr.company_id
+            WHERE rr.id = $id AND rr.company_id = $company_id AND rr.status = $status";
         command.Parameters.AddWithValue("$id", requestId);
+        command.Parameters.AddWithValue("$company_id", companyId);
         command.Parameters.AddWithValue("$status", RegistrationRequestStatuses.Pending);
 
         using var reader = command.ExecuteReader();
@@ -599,14 +722,16 @@ public sealed class UserService
 
         return new PendingRegistrationRequest(
             reader.GetInt32(0),
-            reader.GetString(1),
+            reader.GetInt32(1),
             reader.GetString(2),
             reader.GetString(3),
             reader.GetString(4),
             reader.GetString(5),
             reader.GetString(6),
             reader.GetString(7),
-            ParseDateTime(reader.GetString(8)));
+            reader.GetString(8),
+            reader.GetString(9),
+            ParseDateTime(reader.GetString(10)));
     }
 
     private static void MarkRegistrationRequestReviewed(
@@ -665,23 +790,48 @@ public sealed class UserService
     private static void TouchLastLogin(SqliteConnection connection, int userId, DateTime lastLoginAt)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE users SET last_login_at = $last_login_at WHERE id = $id";
+        command.CommandText = @"
+            UPDATE users
+            SET last_login_at = $last_login_at,
+                failed_login_count = 0,
+                lockout_until = NULL
+            WHERE id = $id";
         command.Parameters.AddWithValue("$id", userId);
         command.Parameters.AddWithValue("$last_login_at", lastLoginAt.ToString("O"));
         command.ExecuteNonQuery();
     }
 
-    private List<Report> GetRecentReportsForAuthor(string username, SqliteConnection connection)
+    private static void RecordFailedLogin(SqliteConnection connection, int userId, int currentFailedCount)
+    {
+        var nextFailedCount = currentFailedCount + 1;
+        var lockoutUntil = nextFailedCount >= MaxFailedLoginAttempts
+            ? DateTime.UtcNow.Add(LoginLockoutDuration).ToString("O")
+            : null;
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE users
+            SET failed_login_count = $failed_login_count,
+                lockout_until = $lockout_until
+            WHERE id = $id";
+        command.Parameters.AddWithValue("$id", userId);
+        command.Parameters.AddWithValue("$failed_login_count", nextFailedCount);
+        command.Parameters.AddWithValue("$lockout_until", (object?)lockoutUntil ?? DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
+    private List<Report> GetRecentReportsForAuthor(int companyId, string username, SqliteConnection connection)
     {
         var reports = new List<Report>();
 
         using var command = connection.CreateCommand();
         command.CommandText = @"
-            SELECT id, name, user_query, intent_json, sql_text, visualization, author, created_at
+            SELECT id, company_id, name, user_query, intent_json, sql_text, visualization, author, created_at
             FROM reports
-            WHERE lower(author) = $author
+            WHERE company_id = $company_id AND lower(author) = $author
             ORDER BY id DESC
             LIMIT 20";
+        command.Parameters.AddWithValue("$company_id", companyId);
         command.Parameters.AddWithValue("$author", NormalizeUsername(username));
 
         using var reader = command.ExecuteReader();
@@ -690,13 +840,14 @@ public sealed class UserService
             reports.Add(new Report
             {
                 Id = reader.GetInt32(0),
-                Name = reader.GetString(1),
-                UserQuery = reader.GetString(2),
-                IntentJson = reader.GetString(3),
-                Sql = reader.GetString(4),
-                Visualization = reader.GetString(5),
-                Author = reader.GetString(6),
-                CreatedAt = ParseDateTime(reader.GetString(7))
+                CompanyId = reader.GetInt32(1),
+                Name = reader.GetString(2),
+                UserQuery = reader.GetString(3),
+                IntentJson = reader.GetString(4),
+                Sql = reader.GetString(5),
+                Visualization = reader.GetString(6),
+                Author = reader.GetString(7),
+                CreatedAt = ParseDateTime(reader.GetString(8))
             });
         }
 
@@ -750,33 +901,50 @@ public sealed class UserService
         new()
         {
             Id = reader.GetInt32(0),
-            Username = reader.GetString(1),
-            Email = reader.IsDBNull(2) ? null : reader.GetString(2),
-            DisplayName = reader.GetString(3),
-            Role = reader.GetString(4),
-            IsActive = reader.GetInt64(5) == 1,
-            CreatedAt = ParseDateTime(reader.GetString(6)),
-            LastLoginAt = reader.IsDBNull(7) ? null : ParseDateTime(reader.GetString(7))
+            CompanyId = reader.GetInt32(1),
+            CompanyName = reader.GetString(2),
+            Username = reader.GetString(3),
+            Email = reader.IsDBNull(4) ? null : reader.GetString(4),
+            DisplayName = reader.GetString(5),
+            Role = reader.GetString(6),
+            IsActive = reader.GetInt64(7) == 1,
+            CreatedAt = ParseDateTime(reader.GetString(8)),
+            LastLoginAt = reader.IsDBNull(9) ? null : ParseDateTime(reader.GetString(9))
         };
 
     private static RegistrationRequest ReadRegistrationRequest(SqliteDataReader reader) =>
         new()
         {
             Id = reader.GetInt32(0),
-            Email = reader.GetString(1),
-            DisplayName = reader.GetString(2),
-            Organization = reader.GetString(3),
-            Comment = reader.GetString(4),
-            Status = reader.GetString(5),
-            RejectionReason = reader.IsDBNull(6) ? null : reader.GetString(6),
-            CreatedAt = ParseDateTime(reader.GetString(7)),
-            ReviewedAt = reader.IsDBNull(8) ? null : ParseDateTime(reader.GetString(8)),
-            ReviewedByUserId = reader.IsDBNull(9) ? null : reader.GetInt32(9),
-            ReviewedByDisplayName = reader.IsDBNull(10) ? null : reader.GetString(10)
+            CompanyId = reader.GetInt32(1),
+            CompanyName = reader.GetString(2),
+            Email = reader.GetString(3),
+            DisplayName = reader.GetString(4),
+            Organization = reader.GetString(5),
+            Comment = reader.GetString(6),
+            Status = reader.GetString(7),
+            RejectionReason = reader.IsDBNull(8) ? null : reader.GetString(8),
+            CreatedAt = ParseDateTime(reader.GetString(9)),
+            ReviewedAt = reader.IsDBNull(10) ? null : ParseDateTime(reader.GetString(10)),
+            ReviewedByUserId = reader.IsDBNull(11) ? null : reader.GetInt32(11),
+            ReviewedByDisplayName = reader.IsDBNull(12) ? null : reader.GetString(12)
         };
 
     private static string NormalizeUsername(string username) =>
         username.Trim().ToLowerInvariant();
+
+    private static string NormalizeCompanySlug(string value)
+    {
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+            .ToArray();
+        var slug = new string(chars).Trim('-');
+        while (slug.Contains("--", StringComparison.Ordinal))
+            slug = slug.Replace("--", "-", StringComparison.Ordinal);
+        return string.IsNullOrWhiteSpace(slug) ? "company" : slug;
+    }
 
     private static string NormalizeEmail(string value)
     {

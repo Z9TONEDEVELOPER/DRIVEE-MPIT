@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using DriveeDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace DriveeDataSpace.Core.Services;
 
@@ -12,11 +13,16 @@ public sealed class AuthTokenService
     private readonly byte[] _signingKey;
     private readonly TimeSpan _lifetime;
 
-    public AuthTokenService(IConfiguration configuration)
+    public AuthTokenService(IConfiguration configuration, IHostEnvironment environment)
     {
+        const string devDefaultKey = "drivee-bi-local-dev-token-signing-key-change-me";
         var configuredKey = configuration["Auth:ApiTokenSigningKey"];
         if (string.IsNullOrWhiteSpace(configuredKey))
-            configuredKey = "drivee-bi-local-dev-token-signing-key-change-me";
+            configuredKey = devDefaultKey;
+        if (environment.IsProduction() && string.Equals(configuredKey, devDefaultKey, StringComparison.Ordinal))
+            throw new InvalidOperationException("Auth:ApiTokenSigningKey must be configured from secret storage in production.");
+        if (configuredKey.Length < 32)
+            throw new InvalidOperationException("Auth:ApiTokenSigningKey must contain at least 32 characters.");
 
         _signingKey = Encoding.UTF8.GetBytes(configuredKey);
         _lifetime = TimeSpan.FromHours(
@@ -30,6 +36,7 @@ public sealed class AuthTokenService
         var expiresAt = DateTimeOffset.UtcNow.Add(_lifetime);
         var session = new AuthUserSession(
             user.Id,
+            user.CompanyId,
             user.Username,
             user.DisplayName,
             user.Role,

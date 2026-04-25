@@ -4,6 +4,7 @@
 @using global::DriveeDataSpace.Core.Models
 @using global::DriveeDataSpace.Web.Models
 @inject global::DriveeDataSpace.Core.Services.ReportService ReportsSvc
+@inject global::DriveeDataSpace.Core.Services.AuditLogService Audit
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -28,15 +29,7 @@
             </form>
         </div>
 
-        <nav class="bi-nav">
-            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
-            <a class="bi-nav-link active" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
-            @if (_isAdmin)
-            {
-                <a class="bi-nav-link" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
-                <a class="bi-nav-link" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
-            }
-        </nav>
+        <SidebarNav Current="reports" IsAdmin="_isAdmin" />
 
         <div class="bi-section-title">Мои отчёты</div>
         <div class="bi-reports-list">
@@ -112,6 +105,8 @@
     private List<Report> _items = new();
     private string _username = "";
     private string _displayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
+    private int? _userId;
     private bool _isAdmin;
 
     protected override async Task OnInitializedAsync()
@@ -119,18 +114,21 @@
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
+        _userId = authState.User.GetUserId();
         _isAdmin = authState.User.IsAdmin();
 
         Load();
     }
 
-    private void Load() => _items = ReportsSvc.ListForAuthor(_username);
+    private void Load() => _items = ReportsSvc.ListForAuthor(_companyId, _username);
 
     private void Open(int id) => Nav.NavigateTo($"/?report={id}");
 
     private void Del(int id)
     {
-        ReportsSvc.DeleteForAuthor(id, _username, _isAdmin);
+        ReportsSvc.DeleteForAuthor(_companyId, id, _username, _isAdmin);
+        Audit.Record(_companyId, _userId, _username, "report.delete", "report", id.ToString(), success: true);
         Load();
     }
 }

@@ -16,7 +16,13 @@ public class SqlGuard
     private static readonly string[] ForbiddenKeywords =
     {
         "drop", "delete", "update", "insert", "alter", "create", "truncate",
-        "attach", "detach", "pragma", "replace", "grant", "revoke", "exec", "execute"
+        "attach", "detach", "pragma", "replace", "grant", "revoke", "exec", "execute",
+        "vacuum", "analyze", "copy", "call", "merge", "comment", "explain"
+    };
+
+    private static readonly string[] ForbiddenFunctions =
+    {
+        "load_extension", "readfile", "writefile", "pg_sleep", "dblink", "lo_import", "lo_export"
     };
 
     private static readonly HashSet<string> SqlKeywords = new(StringComparer.OrdinalIgnoreCase)
@@ -42,6 +48,10 @@ public class SqlGuard
             return new SqlGuardReport(false, "Пустой SQL.", checks);
 
         var trimmedSql = sql.Trim();
+        if (Regex.IsMatch(trimmedSql, @"(--|/\*)", RegexOptions.CultureInvariant))
+            return new SqlGuardReport(false, "SQL comments are not allowed.", checks);
+        checks.Add("no_comments");
+
         var inspectionSql = StripQuotedContent(trimmedSql);
         if (!Regex.IsMatch(trimmedSql, @"^\s*SELECT\b", RegexOptions.IgnoreCase))
             return new SqlGuardReport(false, "Разрешены только SELECT-запросы.", checks);
@@ -62,6 +72,13 @@ public class SqlGuard
                 return new SqlGuardReport(false, $"Запрещённая команда: {keyword.ToUpperInvariant()}.", checks);
         }
         checks.Add("no_mutations");
+
+        foreach (var function in ForbiddenFunctions)
+        {
+            if (Regex.IsMatch(inspectionSql, $@"\b{function}\s*\(", RegexOptions.IgnoreCase))
+                return new SqlGuardReport(false, $"Forbidden function: {function}.", checks);
+        }
+        checks.Add("no_dangerous_functions");
 
         var limitMatch = Regex.Match(trimmedSql, @"\blimit\s+(\d+)\b", RegexOptions.IgnoreCase);
         if (!limitMatch.Success)

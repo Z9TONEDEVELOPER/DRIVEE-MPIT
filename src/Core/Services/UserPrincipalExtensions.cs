@@ -21,4 +21,10 @@ public static class UserPrincipalExtensions
         var value = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         return int.TryParse(value, out var id) ? id : null;
     }
+
+    public static int GetCompanyId(this ClaimsPrincipal user)
+    {
+        var value = user.FindFirst("company_id")?.Value;
+        return int.TryParse(value, out var id) && id > 0 ? id : CompanyDefaults.DefaultCompanyId;
+    }
 }

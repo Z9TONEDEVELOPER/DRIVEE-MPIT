@@ -25,9 +25,11 @@ public static class DataSourceProviders
 public sealed class CompanyDataSource
 {
     public int Id { get; set; }
+    public int CompanyId { get; set; } = CompanyDefaults.DefaultCompanyId;
     public string Name { get; set; } = "";
     public string Provider { get; set; } = DataSourceProviders.Sqlite;
     public string ConnectionString { get; set; } = "";
+    public bool IsConnectionStringMasked { get; set; }
     public string? SemanticJson { get; set; }
     public string? SchemaJson { get; set; }
     public bool IsBuiltin { get; set; }

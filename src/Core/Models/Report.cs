@@ -3,6 +3,7 @@ namespace DriveeDataSpace.Core.Models;
 public class Report
 {
     public int Id { get; set; }
+    public int CompanyId { get; set; } = CompanyDefaults.DefaultCompanyId;
     public string Name { get; set; } = "";
     public string UserQuery { get; set; } = "";
     public string IntentJson { get; set; } = "";

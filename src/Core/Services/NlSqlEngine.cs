@@ -18,6 +18,7 @@ public class NlSqlEngine
     private readonly SqlBuilder _sqlBuilder;
     private readonly ExplainEngine _explainEngine;
     private readonly QueryExecutor _queryExecutor;
+    private readonly TenantContext _tenantContext;
     private readonly ILogger<NlSqlEngine> _logger;
 
     public NlSqlEngine(
@@ -27,6 +28,7 @@ public class NlSqlEngine
         SqlBuilder sqlBuilder,
         ExplainEngine explainEngine,
         QueryExecutor queryExecutor,
+        TenantContext tenantContext,
         ILogger<NlSqlEngine> logger)
     {
         _llmService = llmService;
@@ -35,6 +37,7 @@ public class NlSqlEngine
         _sqlBuilder = sqlBuilder;
         _explainEngine = explainEngine;
         _queryExecutor = queryExecutor;
+        _tenantContext = tenantContext;
         _logger = logger;
     }
 
@@ -42,8 +45,10 @@ public class NlSqlEngine
         string userQuery,
         IReadOnlyList<ChatTurn>? history = null,
         QueryIntent? previousIntent = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? companyId = null)
     {
+        using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
         var pipelineResult = new PipelineResult { UserQuery = userQuery };
         var totalStopwatch = Stopwatch.StartNew();
 
@@ -157,8 +162,9 @@ public class NlSqlEngine
     private static bool RequiresWriteAccess(string userQuery) =>
         !string.IsNullOrWhiteSpace(userQuery) && WriteIntentPattern.IsMatch(userQuery);
 
-    public PipelineResult ReplayFromReport(string intentJson, CancellationToken cancellationToken = default)
+    public PipelineResult ReplayFromReport(string intentJson, CancellationToken cancellationToken = default, int? companyId = null)
     {
+        using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
         var storedIntent = JsonSerializer.Deserialize<QueryIntent>(intentJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true

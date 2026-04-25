@@ -9,9 +9,11 @@ public class ReportService
 {
     private const int BusyTimeoutMs = 5_000;
     private readonly string _db;
+    private readonly TenantContext _tenantContext;
 
-    public ReportService(IConfiguration cfg, IHostEnvironment environment)
+    public ReportService(IConfiguration cfg, IHostEnvironment environment, TenantContext tenantContext)
     {
+        _tenantContext = tenantContext;
         _db = DataPathResolver.Resolve(environment, cfg["Data:ReportsDb"], "Data/reports.db");
         var dir = Path.GetDirectoryName(_db);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -26,6 +28,7 @@ public class ReportService
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS reports (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id    INTEGER NOT NULL DEFAULT 1,
                 name          TEXT NOT NULL,
                 user_query    TEXT NOT NULL,
                 intent_json   TEXT NOT NULL,
@@ -35,14 +38,20 @@ public class ReportService
                 created_at    TEXT NOT NULL
             );";
         cmd.ExecuteNonQuery();
+        EnsureColumn(c, "reports", "company_id", "INTEGER NOT NULL DEFAULT 1");
+
+        using var companyIndex = c.CreateCommand();
+        companyIndex.CommandText = "CREATE INDEX IF NOT EXISTS ix_reports_company_author ON reports(company_id, author, id DESC);";
+        companyIndex.ExecuteNonQuery();
     }
 
     public int Save(Report r)
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = @"INSERT INTO reports(name,user_query,intent_json,sql_text,visualization,author,created_at)
-                            VALUES($n,$q,$i,$s,$v,$a,$t); SELECT last_insert_rowid();";
+        cmd.CommandText = @"INSERT INTO reports(company_id,name,user_query,intent_json,sql_text,visualization,author,created_at)
+                            VALUES($company_id,$n,$q,$i,$s,$v,$a,$t); SELECT last_insert_rowid();";
+        cmd.Parameters.AddWithValue("$company_id", r.CompanyId <= 0 ? CompanyDefaults.DefaultCompanyId : r.CompanyId);
         cmd.Parameters.AddWithValue("$n", r.Name);
         cmd.Parameters.AddWithValue("$q", r.UserQuery);
         cmd.Parameters.AddWithValue("$i", r.IntentJson);
@@ -57,40 +66,48 @@ public class ReportService
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports ORDER BY id DESC";
+        cmd.CommandText = @"
+            SELECT id,company_id,name,user_query,intent_json,sql_text,visualization,author,created_at
+            FROM reports
+            WHERE company_id = $company_id
+            ORDER BY id DESC";
+        cmd.Parameters.AddWithValue("$company_id", _tenantContext.CompanyId);
         return ReadReports(cmd);
     }
 
-    public List<Report> ListForAuthor(string author)
+    public List<Report> ListForAuthor(int companyId, string author)
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at
+            SELECT id,company_id,name,user_query,intent_json,sql_text,visualization,author,created_at
             FROM reports
-            WHERE lower(author) = $author
+            WHERE company_id = $company_id AND lower(author) = $author
             ORDER BY id DESC";
+        cmd.Parameters.AddWithValue("$company_id", companyId);
         cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
         return ReadReports(cmd);
     }
 
-    public Report? Get(int id)
+    public Report? Get(int companyId, int id)
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id";
+        cmd.CommandText = "SELECT id,company_id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id AND company_id=$company_id";
         cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$company_id", companyId);
         return ReadSingle(cmd);
     }
 
-    public Report? GetForAuthor(int id, string author, bool isAdmin)
+    public Report? GetForAuthor(int companyId, int id, string author, bool isAdmin)
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = isAdmin
-            ? "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id"
-            : "SELECT id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id AND lower(author)=$author";
+            ? "SELECT id,company_id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id AND company_id=$company_id"
+            : "SELECT id,company_id,name,user_query,intent_json,sql_text,visualization,author,created_at FROM reports WHERE id=$id AND company_id=$company_id AND lower(author)=$author";
         cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$company_id", companyId);
         if (!isAdmin)
         {
             cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
@@ -108,14 +125,15 @@ public class ReportService
         cmd.ExecuteNonQuery();
     }
 
-    public void DeleteForAuthor(int id, string author, bool isAdmin)
+    public void DeleteForAuthor(int companyId, int id, string author, bool isAdmin)
     {
         using var c = OpenConnection();
         using var cmd = c.CreateCommand();
         cmd.CommandText = isAdmin
-            ? "DELETE FROM reports WHERE id=$id"
-            : "DELETE FROM reports WHERE id=$id AND lower(author)=$author";
+            ? "DELETE FROM reports WHERE id=$id AND company_id=$company_id"
+            : "DELETE FROM reports WHERE id=$id AND company_id=$company_id AND lower(author)=$author";
         cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$company_id", companyId);
         if (!isAdmin)
         {
             cmd.Parameters.AddWithValue("$author", NormalizeAuthor(author));
@@ -146,13 +164,14 @@ public class ReportService
         new()
         {
             Id = r.GetInt32(0),
-            Name = r.GetString(1),
-            UserQuery = r.GetString(2),
-            IntentJson = r.GetString(3),
-            Sql = r.GetString(4),
-            Visualization = r.GetString(5),
-            Author = r.GetString(6),
-            CreatedAt = DateTime.Parse(r.GetString(7))
+            CompanyId = r.GetInt32(1),
+            Name = r.GetString(2),
+            UserQuery = r.GetString(3),
+            IntentJson = r.GetString(4),
+            Sql = r.GetString(5),
+            Visualization = r.GetString(6),
+            Author = r.GetString(7),
+            CreatedAt = DateTime.Parse(r.GetString(8))
         };
 
     private static string NormalizeAuthor(string author) =>
@@ -180,5 +199,24 @@ public class ReportService
         using var journalCommand = connection.CreateCommand();
         journalCommand.CommandText = "PRAGMA journal_mode = WAL;";
         _ = journalCommand.ExecuteScalar();
+    }
+
+    private static void EnsureColumn(SqliteConnection connection, string tableName, string columnName, string definition)
+    {
+        using var tableInfo = connection.CreateCommand();
+        tableInfo.CommandText = $"PRAGMA table_info({tableName});";
+
+        using (var reader = tableInfo.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
+        alter.ExecuteNonQuery();
     }
 }

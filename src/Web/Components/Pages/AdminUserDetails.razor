@@ -25,12 +25,7 @@
             </form>
         </div>
 
-        <nav class="bi-nav">
-            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
-            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
-            <a class="bi-nav-link" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
-            <a class="bi-nav-link active" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
-        </nav>
+        <SidebarNav Current="users" IsAdmin="true" />
     </aside>
 
     <main class="bi-chat-main">
@@ -106,14 +101,15 @@
     private AppUserDetail? _user;
     private string _adminUsername = "";
     private string _adminDisplayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
 
     protected override async Task OnInitializedAsync()
     {
-        _user = Users.GetUserDetail(Id);
-
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _adminUsername = authState.User.GetUsername();
         _adminDisplayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
+        _user = Users.GetUserDetail(_companyId, Id);
     }
 
     private static string FormatDate(DateTime? value) =>

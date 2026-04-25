@@ -62,6 +62,7 @@ public class SemanticLayer
     private readonly DataSourceService? _dataSources;
     private readonly SemanticLayerProfile _defaultProfile;
     private readonly object _cacheLock = new();
+    private int? _cachedCompanyId;
     private int? _cachedDataSourceId;
     private string? _cachedSemanticJson;
     private SemanticLayerProfile? _cachedProfile;
@@ -405,6 +406,7 @@ public class SemanticLayer
         lock (_cacheLock)
         {
             if (_cachedProfile != null &&
+                _cachedCompanyId == activeDataSource.CompanyId &&
                 _cachedDataSourceId == activeDataSource.Id &&
                 string.Equals(_cachedSemanticJson, activeDataSource.SemanticJson, StringComparison.Ordinal))
             {
@@ -412,6 +414,7 @@ public class SemanticLayer
             }
 
             _cachedProfile = ParseProfile(activeDataSource.SemanticJson);
+            _cachedCompanyId = activeDataSource.CompanyId;
             _cachedDataSourceId = activeDataSource.Id;
             _cachedSemanticJson = activeDataSource.SemanticJson;
             return _cachedProfile;

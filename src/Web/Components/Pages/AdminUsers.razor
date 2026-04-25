@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject UserService Users
 @inject EmailService Email
+@inject AuditLogService Audit
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -27,12 +28,7 @@
             </form>
         </div>
 
-        <nav class="bi-nav">
-            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
-            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
-            <a class="bi-nav-link" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
-            <a class="bi-nav-link active" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
-        </nav>
+        <SidebarNav Current="users" IsAdmin="true" />
     </aside>
 
     <main class="bi-chat-main">
@@ -215,6 +211,7 @@
     private readonly Dictionary<int, string> _rejectionReasons = new();
     private string _username = "";
     private string _displayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
     private int _adminUserId;
     private bool _busy;
     private string? _notice;
@@ -222,12 +219,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        Refresh();
-
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
         _adminUserId = authState.User.GetUserId() ?? 0;
+        Refresh();
     }
 
     private void OpenUser(int id) => Navigation.NavigateTo($"/admin/users/{id}");
@@ -243,7 +240,8 @@
 
         try
         {
-            var result = Users.ApproveRegistrationRequest(requestId, _adminUserId);
+            var result = Users.ApproveRegistrationRequest(_companyId, requestId, _adminUserId);
+            Audit.Record(_companyId, _adminUserId, _username, "registration.approve", "registration_request", requestId.ToString(), success: true);
             _notice = $"Заявка #{requestId} одобрена.";
             try
             {
@@ -278,7 +276,8 @@
 
         try
         {
-            var result = Users.RejectRegistrationRequest(requestId, _adminUserId, GetRejectionReason(requestId));
+            var result = Users.RejectRegistrationRequest(_companyId, requestId, _adminUserId, GetRejectionReason(requestId));
+            Audit.Record(_companyId, _adminUserId, _username, "registration.reject", "registration_request", requestId.ToString(), success: true);
             _notice = $"Заявка #{requestId} отклонена.";
             try
             {
@@ -304,8 +303,8 @@
 
     private void Refresh()
     {
-        _users = Users.ListUsers();
-        _pendingRequests = Users.ListRegistrationRequests(RegistrationRequestStatuses.Pending);
+        _users = Users.ListUsers(_companyId);
+        _pendingRequests = Users.ListRegistrationRequests(_companyId, RegistrationRequestStatuses.Pending);
         _localEmails = Email.ListLocalEmails();
         foreach (var requestId in _rejectionReasons.Keys.Except(_pendingRequests.Select(request => request.Id)).ToList())
             _rejectionReasons.Remove(requestId);

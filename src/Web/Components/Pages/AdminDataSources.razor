@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject DataSourceService DataSources
 @inject LlmSettingsService LlmSettingsService
+@inject AuditLogService Audit
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Drivee BI · Data sources</PageTitle>
@@ -26,12 +27,7 @@
             </form>
         </div>
 
-        <nav class="bi-nav">
-            <a class="bi-nav-link" href="/"><span class="bi-nav-ico">◀</span> Workspace</a>
-            <a class="bi-nav-link" href="/reports"><span class="bi-nav-ico">▤</span> Отчёты</a>
-            <a class="bi-nav-link" href="/admin/users"><span class="bi-nav-ico">☰</span> Пользователи</a>
-            <a class="bi-nav-link active" href="/admin/data-sources"><span class="bi-nav-ico">◎</span> Источники данных</a>
-        </nav>
+        <SidebarNav Current="data-sources" IsAdmin="true" />
     </aside>
 
     <main class="bi-chat-main">
@@ -266,6 +262,8 @@
     private SchemaInspectionResult? _schema;
     private string _username = "";
     private string _displayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
+    private int _adminUserId;
     private bool _busy;
     private bool _selectedIsBuiltin;
     private bool _selectedIsActive;
@@ -280,16 +278,18 @@
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
+        _adminUserId = authState.User.GetUserId() ?? 0;
         LoadLlmSettings();
         Refresh();
         Edit(_items.FirstOrDefault(item => item.IsActive) ?? _items.FirstOrDefault());
     }
 
-    private void Refresh() => _items = DataSources.List();
+    private void Refresh() => _items = DataSources.List(_companyId);
 
     private void LoadLlmSettings()
     {
-        _llmSettings = LlmSettingsService.Get();
+        _llmSettings = LlmSettingsService.Get(_companyId);
         _selectedLlmProvider = _llmSettings.Provider;
     }
 
@@ -297,8 +297,9 @@
     {
         RunAdminAction(() =>
         {
-            _llmSettings = LlmSettingsService.SetProvider(_selectedLlmProvider);
+            _llmSettings = LlmSettingsService.SetProvider(_selectedLlmProvider, _companyId);
             _selectedLlmProvider = _llmSettings.Provider;
+            AuditAdmin("llm_settings.update", "llm_settings", details: _llmSettings.Provider);
             _notice = $"LLM provider сохранён: {_llmSettings.Provider}.";
         });
     }
@@ -369,9 +370,10 @@
     {
         RunAdminAction(() =>
         {
-            var id = DataSources.Save(_input);
+            var id = DataSources.Save(_input, _companyId);
             Refresh();
             Edit(_items.First(item => item.Id == id));
+            AuditAdmin("data_source.save", "data_source", id.ToString());
             _notice = "Источник данных сохранён.";
         });
     }
@@ -380,9 +382,10 @@
     {
         RunAdminAction(() =>
         {
-            DataSources.Activate(id);
+            DataSources.Activate(id, _companyId);
             Refresh();
             Edit(_items.First(item => item.Id == id));
+            AuditAdmin("data_source.activate", "data_source", id.ToString());
             _notice = "Источник данных активирован.";
         });
     }
@@ -394,9 +397,10 @@
 
         RunAdminAction(() =>
         {
-            DataSources.Delete(id);
+            DataSources.Delete(id, _companyId);
             Refresh();
             Edit(_items.FirstOrDefault(item => item.IsActive) ?? _items.FirstOrDefault());
+            AuditAdmin("data_source.delete", "data_source", id.ToString());
             _notice = "Источник данных удалён.";
         });
     }
@@ -408,8 +412,9 @@
 
         RunAdminAction(() =>
         {
-            _testResult = DataSources.Test(id);
+            _testResult = DataSources.Test(id, _companyId);
             Refresh();
+            AuditAdmin("data_source.test", "data_source", id.ToString(), _testResult.Ok, _testResult.Message);
         });
     }
 
@@ -420,8 +425,9 @@
 
         RunAdminAction(() =>
         {
-            _schema = DataSources.InspectSchema(id);
+            _schema = DataSources.InspectSchema(id, _companyId);
             Refresh();
+            AuditAdmin("data_source.inspect_schema", "data_source", id.ToString(), details: $"{_schema.Tables.Count} tables");
             _notice = $"Схема прочитана: {_schema.Tables.Count} таблиц.";
         });
     }
@@ -433,7 +439,8 @@
 
         RunAdminAction(() =>
         {
-            var semanticDraft = DataSources.BuildSemanticDraftFromLastSchema(id);
+            var semanticDraft = DataSources.BuildSemanticDraftFromLastSchema(id, _companyId);
+            AuditAdmin("data_source.semantic_draft", "data_source", id.ToString());
 
             if (_selectedIsBuiltin)
             {
@@ -470,6 +477,9 @@
         string.IsNullOrWhiteSpace(table.SchemaName)
             ? table.Name
             : $"{table.SchemaName}.{table.Name}";
+
+    private void AuditAdmin(string action, string targetType, string? targetId = null, bool success = true, string? details = null) =>
+        Audit.Record(_companyId, _adminUserId <= 0 ? null : _adminUserId, _username, action, targetType, targetId, success, details);
 
     private void RunAdminAction(Action action)
     {

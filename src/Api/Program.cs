@@ -5,6 +5,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient("llm");
+builder.Services.AddSingleton<TenantContext>();
+builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<AuditLogService>();
 builder.Services.AddSingleton<DataSourceService>();
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
@@ -41,12 +44,16 @@ app.MapGet("/health", () => Results.Ok(new
     service = "DriveeDataSpace.Api"
 }));
 
-app.MapPost("/api/auth/login", (LoginRequest request, UserService users, AuthTokenService tokens) =>
+app.MapPost("/api/auth/login", (LoginRequest request, UserService users, AuthTokenService tokens, AuditLogService audit) =>
 {
     var user = users.Authenticate(request.Username, request.Password);
     if (user == null)
+    {
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, request.Username, "auth.login", "user", success: false);
         return Results.Unauthorized();
+    }
 
+    audit.Record(user.CompanyId, user.Id, user.Username, "auth.login", "user", user.Id.ToString(), success: true);
     return Results.Ok(tokens.CreateSession(user));
 }).DisableAntiforgery();
 
@@ -80,7 +87,7 @@ app.MapGet("/api/admin/users", (HttpContext context, AuthTokenService tokens, Us
     if (!IsAdmin(session))
         return Results.Forbid();
 
-    return Results.Ok(users.ListUsers());
+    return Results.Ok(users.ListUsers(session.CompanyId));
 });
 
 app.MapGet("/api/admin/registration-requests", (string? status, HttpContext context, AuthTokenService tokens, UserService users) =>
@@ -91,7 +98,7 @@ app.MapGet("/api/admin/registration-requests", (string? status, HttpContext cont
     if (!IsAdmin(session))
         return Results.Forbid();
 
-    return Results.Ok(users.ListRegistrationRequests(status));
+    return Results.Ok(users.ListRegistrationRequests(session.CompanyId, status));
 });
 
 app.MapGet("/api/admin/llm-settings", (HttpContext context, AuthTokenService tokens, LlmSettingsService settings) =>
@@ -102,10 +109,10 @@ app.MapGet("/api/admin/llm-settings", (HttpContext context, AuthTokenService tok
     if (!IsAdmin(session))
         return Results.Forbid();
 
-    return Results.Ok(settings.Get());
+    return Results.Ok(settings.Get(session.CompanyId));
 });
 
-app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpContext context, AuthTokenService tokens, LlmSettingsService settings) =>
+app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpContext context, AuthTokenService tokens, LlmSettingsService settings, AuditLogService audit) =>
 {
     var session = GetCurrentSession(context, tokens);
     if (session == null)
@@ -115,10 +122,13 @@ app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpCo
 
     try
     {
-        return Results.Ok(settings.SetProvider(request.Provider));
+        var result = settings.SetProvider(request.Provider, session.CompanyId);
+        audit.Record(session.CompanyId, session.Id, session.Username, "llm_settings.update", "llm_settings", success: true, details: result.Provider);
+        return Results.Ok(result);
     }
     catch (InvalidOperationException exception)
     {
+        audit.Record(session.CompanyId, session.Id, session.Username, "llm_settings.update", "llm_settings", success: false, details: exception.Message);
         return Results.BadRequest(new { error = exception.Message });
     }
 }).DisableAntiforgery();
@@ -129,6 +139,7 @@ app.MapPost("/api/admin/registration-requests/{id:int}/approve", async (
     AuthTokenService tokens,
     UserService users,
     EmailService email,
+    AuditLogService audit,
     CancellationToken cancellationToken) =>
 {
     var session = GetCurrentSession(context, tokens);
@@ -139,12 +150,14 @@ app.MapPost("/api/admin/registration-requests/{id:int}/approve", async (
 
     try
     {
-        var result = users.ApproveRegistrationRequest(id, session.Id);
+        var result = users.ApproveRegistrationRequest(session.CompanyId, id, session.Id);
         await email.SendRegistrationApprovedAsync(result.Request, cancellationToken);
+        audit.Record(session.CompanyId, session.Id, session.Username, "registration.approve", "registration_request", id.ToString(), success: true);
         return Results.Ok(result);
     }
     catch (InvalidOperationException exception)
     {
+        audit.Record(session.CompanyId, session.Id, session.Username, "registration.approve", "registration_request", id.ToString(), success: false, details: exception.Message);
         return Results.BadRequest(new { error = exception.Message });
     }
 }).DisableAntiforgery();
@@ -156,6 +169,7 @@ app.MapPost("/api/admin/registration-requests/{id:int}/reject", async (
     AuthTokenService tokens,
     UserService users,
     EmailService email,
+    AuditLogService audit,
     CancellationToken cancellationToken) =>
 {
     var session = GetCurrentSession(context, tokens);
@@ -166,12 +180,14 @@ app.MapPost("/api/admin/registration-requests/{id:int}/reject", async (
 
     try
     {
-        var result = users.RejectRegistrationRequest(id, session.Id, request.Reason);
+        var result = users.RejectRegistrationRequest(session.CompanyId, id, session.Id, request.Reason);
         await email.SendRegistrationRejectedAsync(result.Request, cancellationToken);
+        audit.Record(session.CompanyId, session.Id, session.Username, "registration.reject", "registration_request", id.ToString(), success: true);
         return Results.Ok(result);
     }
     catch (InvalidOperationException exception)
     {
+        audit.Record(session.CompanyId, session.Id, session.Username, "registration.reject", "registration_request", id.ToString(), success: false, details: exception.Message);
         return Results.BadRequest(new { error = exception.Message });
     }
 }).DisableAntiforgery();
@@ -181,20 +197,22 @@ app.MapPost("/api/query", async (
     HttpContext context,
     AuthTokenService tokens,
     NlSqlEngine engine,
+    TenantContext tenantContext,
+    AuditLogService audit,
     CancellationToken cancellationToken) =>
 {
-    if (GetCurrentSession(context, tokens) == null)
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
         return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(request.Text))
         return Results.BadRequest(new { error = "Query text is empty." });
 
-    var result = await engine.RunAsync(
-        request.Text.Trim(),
-        request.History,
-        request.PreviousIntent,
-        cancellationToken);
-    result.UserQuery = request.Text.Trim();
+    using var tenantScope = tenantContext.Use(session.CompanyId);
+    var queryText = request.Text.Trim();
+    var result = await engine.RunAsync(queryText, request.History, request.PreviousIntent, cancellationToken);
+    result.UserQuery = queryText;
+    audit.Record(session.CompanyId, session.Id, session.Username, "query.run", "query", success: string.IsNullOrWhiteSpace(result.Error), details: queryText);
     return Results.Ok(result);
 }).DisableAntiforgery();
 
@@ -203,10 +221,10 @@ app.MapGet("/api/reports", (HttpContext context, AuthTokenService tokens, Report
     var session = GetCurrentSession(context, tokens);
     return session == null
         ? Results.Unauthorized()
-        : Results.Ok(reports.ListForAuthor(session.Username));
+        : Results.Ok(reports.ListForAuthor(session.CompanyId, session.Username));
 });
 
-app.MapPost("/api/reports", (SaveReportRequest request, HttpContext context, AuthTokenService tokens, ReportService reports) =>
+app.MapPost("/api/reports", (SaveReportRequest request, HttpContext context, AuthTokenService tokens, ReportService reports, AuditLogService audit) =>
 {
     var session = GetCurrentSession(context, tokens);
     if (session == null)
@@ -220,6 +238,7 @@ app.MapPost("/api/reports", (SaveReportRequest request, HttpContext context, Aut
     var report = new Report
     {
         Name = request.Name.Trim(),
+        CompanyId = session.CompanyId,
         UserQuery = request.UserQuery?.Trim() ?? string.Empty,
         IntentJson = request.IntentJson,
         Sql = request.Sql,
@@ -229,31 +248,35 @@ app.MapPost("/api/reports", (SaveReportRequest request, HttpContext context, Aut
     };
 
     report.Id = reports.Save(report);
+    audit.Record(session.CompanyId, session.Id, session.Username, "report.save", "report", report.Id.ToString(), success: true);
     return Results.Ok(report);
 }).DisableAntiforgery();
 
-app.MapPost("/api/reports/{id:int}/rerun", (int id, HttpContext context, AuthTokenService tokens, NlSqlEngine engine, ReportService reports) =>
+app.MapPost("/api/reports/{id:int}/rerun", (int id, HttpContext context, AuthTokenService tokens, NlSqlEngine engine, ReportService reports, TenantContext tenantContext, AuditLogService audit) =>
 {
     var session = GetCurrentSession(context, tokens);
     if (session == null)
         return Results.Unauthorized();
 
-    var report = reports.GetForAuthor(id, session.Username, IsAdmin(session));
+    var report = reports.GetForAuthor(session.CompanyId, id, session.Username, IsAdmin(session));
     if (report == null)
         return Results.NotFound(new { error = "Report not found." });
 
+    using var tenantScope = tenantContext.Use(session.CompanyId);
     var result = engine.ReplayFromReport(report.IntentJson);
     result.UserQuery = report.UserQuery;
+    audit.Record(session.CompanyId, session.Id, session.Username, "report.rerun", "report", id.ToString(), success: true);
     return Results.Ok(result);
 }).DisableAntiforgery();
 
-app.MapDelete("/api/reports/{id:int}", (int id, HttpContext context, AuthTokenService tokens, ReportService reports) =>
+app.MapDelete("/api/reports/{id:int}", (int id, HttpContext context, AuthTokenService tokens, ReportService reports, AuditLogService audit) =>
 {
     var session = GetCurrentSession(context, tokens);
     if (session == null)
         return Results.Unauthorized();
 
-    reports.DeleteForAuthor(id, session.Username, IsAdmin(session));
+    reports.DeleteForAuthor(session.CompanyId, id, session.Username, IsAdmin(session));
+    audit.Record(session.CompanyId, session.Id, session.Username, "report.delete", "report", id.ToString(), success: true);
     return Results.NoContent();
 });
 

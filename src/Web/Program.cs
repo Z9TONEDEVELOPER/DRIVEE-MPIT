@@ -19,6 +19,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     .AddCookie(options =>
     {
         options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? "drivee.bi.auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         options.LoginPath = "/login";
         options.AccessDeniedPath = "/login";
         options.SlidingExpiration = true;
@@ -28,6 +31,9 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddHttpClient("llm");
+builder.Services.AddSingleton<TenantContext>();
+builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<AuditLogService>();
 builder.Services.AddSingleton<DataSourceService>();
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
@@ -64,7 +70,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapPost("/auth/login", async (HttpContext context, UserService users) =>
+app.MapPost("/auth/login", async (HttpContext context, UserService users, AuditLogService audit) =>
 {
     var form = await context.Request.ReadFormAsync();
     var username = form["username"].ToString();
@@ -74,6 +80,7 @@ app.MapPost("/auth/login", async (HttpContext context, UserService users) =>
     var user = users.Authenticate(username, password);
     if (user == null)
     {
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, username, "auth.login", "user", success: false);
         var loginUrl = $"/login?error={Uri.EscapeDataString("Неверный логин или пароль.")}&returnUrl={Uri.EscapeDataString(returnUrl)}";
         context.Response.Redirect(loginUrl);
         return;
@@ -82,6 +89,7 @@ app.MapPost("/auth/login", async (HttpContext context, UserService users) =>
     var claims = new List<Claim>
     {
         new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        new("company_id", user.CompanyId.ToString()),
         new(ClaimTypes.Name, user.Username),
         new(ClaimTypes.GivenName, user.DisplayName),
         new(ClaimTypes.Role, user.Role)
@@ -100,6 +108,7 @@ app.MapPost("/auth/login", async (HttpContext context, UserService users) =>
             ExpiresUtc = DateTimeOffset.UtcNow.AddHours(12)
         });
 
+    audit.Record(user.CompanyId, user.Id, user.Username, "auth.login", "user", user.Id.ToString(), success: true);
     context.Response.Redirect(returnUrl);
 }).DisableAntiforgery().AllowAnonymous();
 
@@ -112,28 +121,44 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
 app.MapPost("/api/query", async (
     QueryRequest request,
     NlSqlEngine engine,
+    HttpContext context,
+    TenantContext tenantContext,
+    AuditLogService audit,
     CancellationToken cancellationToken) =>
 {
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
     if (string.IsNullOrWhiteSpace(request.Text))
         return Results.BadRequest(new { error = "Query text is empty." });
 
+    var companyId = GetApiCompanyId(context);
+    var queryText = request.Text.Trim();
+    using var tenantScope = tenantContext.Use(companyId);
     var result = await engine.RunAsync(
-        request.Text.Trim(),
+        queryText,
         request.History,
         request.PreviousIntent,
         cancellationToken);
-    result.UserQuery = request.Text.Trim();
+    result.UserQuery = queryText;
+    audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "query.run", "query", success: string.IsNullOrWhiteSpace(result.Error), details: queryText);
     return Results.Ok(result);
-}).DisableAntiforgery().AllowAnonymous();
+}).DisableAntiforgery();
 
 app.MapGet("/api/reports", (ReportService reports, HttpContext context) =>
 {
-    var userName = GetApiUserName(context);
-    return Results.Ok(reports.ListForAuthor(userName));
-}).AllowAnonymous();
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
 
-app.MapPost("/api/reports", (SaveReportRequest request, ReportService reports, HttpContext context) =>
+    var userName = GetApiUserName(context);
+    return Results.Ok(reports.ListForAuthor(GetApiCompanyId(context), userName));
+});
+
+app.MapPost("/api/reports", (SaveReportRequest request, ReportService reports, HttpContext context, AuditLogService audit) =>
 {
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
     if (string.IsNullOrWhiteSpace(request.Name))
         return Results.BadRequest(new { error = "Report name is empty." });
     if (string.IsNullOrWhiteSpace(request.IntentJson) || string.IsNullOrWhiteSpace(request.Sql))
@@ -142,6 +167,7 @@ app.MapPost("/api/reports", (SaveReportRequest request, ReportService reports, H
     var report = new Report
     {
         Name = request.Name.Trim(),
+        CompanyId = GetApiCompanyId(context),
         UserQuery = request.UserQuery?.Trim() ?? string.Empty,
         IntentJson = request.IntentJson,
         Sql = request.Sql,
@@ -151,29 +177,43 @@ app.MapPost("/api/reports", (SaveReportRequest request, ReportService reports, H
     };
 
     report.Id = reports.Save(report);
+    audit.Record(report.CompanyId, GetApiUserId(context), report.Author, "report.save", "report", report.Id.ToString(), success: true);
     return Results.Ok(report);
-}).DisableAntiforgery().AllowAnonymous();
+}).DisableAntiforgery();
 
 app.MapPost("/api/reports/{id:int}/rerun", (
     int id,
     NlSqlEngine engine,
     ReportService reports,
-    HttpContext context) =>
+    HttpContext context,
+    TenantContext tenantContext,
+    AuditLogService audit) =>
 {
-    var report = reports.GetForAuthor(id, GetApiUserName(context), IsApiAdmin(context));
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var companyId = GetApiCompanyId(context);
+    var report = reports.GetForAuthor(companyId, id, GetApiUserName(context), IsApiAdmin(context));
     if (report == null)
         return Results.NotFound(new { error = "Report not found." });
 
+    using var tenantScope = tenantContext.Use(companyId);
     var result = engine.ReplayFromReport(report.IntentJson);
     result.UserQuery = report.UserQuery;
+    audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "report.rerun", "report", id.ToString(), success: true);
     return Results.Ok(result);
-}).DisableAntiforgery().AllowAnonymous();
+}).DisableAntiforgery();
 
-app.MapDelete("/api/reports/{id:int}", (int id, ReportService reports, HttpContext context) =>
+app.MapDelete("/api/reports/{id:int}", (int id, ReportService reports, HttpContext context, AuditLogService audit) =>
 {
-    reports.DeleteForAuthor(id, GetApiUserName(context), IsApiAdmin(context));
+    if (context.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var companyId = GetApiCompanyId(context);
+    reports.DeleteForAuthor(companyId, id, GetApiUserName(context), IsApiAdmin(context));
+    audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "report.delete", "report", id.ToString(), success: true);
     return Results.NoContent();
-}).AllowAnonymous();
+});
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
@@ -197,6 +237,14 @@ static string GetApiUserName(HttpContext context) =>
     context.User.Identity?.IsAuthenticated == true
         ? context.User.Identity.Name ?? "desktop"
         : "desktop";
+
+static int GetApiCompanyId(HttpContext context) =>
+    context.User.Identity?.IsAuthenticated == true
+        ? context.User.GetCompanyId()
+        : CompanyDefaults.DefaultCompanyId;
+
+static int? GetApiUserId(HttpContext context) =>
+    int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 
 static bool IsApiAdmin(HttpContext context) =>
     context.User.Identity?.IsAuthenticated == true && context.User.IsInRole(AppRoles.Admin);

@@ -9,6 +9,8 @@ public static class AppRoles
 public class AppUser
 {
     public int Id { get; set; }
+    public int CompanyId { get; set; } = CompanyDefaults.DefaultCompanyId;
+    public string CompanyName { get; set; } = CompanyDefaults.DefaultCompanyName;
     public string Username { get; set; } = "";
     public string? Email { get; set; }
     public string DisplayName { get; set; } = "";
@@ -35,6 +37,21 @@ public sealed class SeedUserOptions
     public string DisplayName { get; set; } = "";
     public string Password { get; set; } = "";
     public string Role { get; set; } = AppRoles.User;
+    public string Company { get; set; } = CompanyDefaults.DefaultCompanyName;
+}
+
+public static class CompanyDefaults
+{
+    public const int DefaultCompanyId = 1;
+    public const string DefaultCompanyName = "Default company";
+}
+
+public sealed class Company
+{
+    public int Id { get; set; } = CompanyDefaults.DefaultCompanyId;
+    public string Name { get; set; } = CompanyDefaults.DefaultCompanyName;
+    public string Slug { get; set; } = "default";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public static class RegistrationRequestStatuses
@@ -47,6 +64,8 @@ public static class RegistrationRequestStatuses
 public sealed class RegistrationRequest
 {
     public int Id { get; set; }
+    public int CompanyId { get; set; } = CompanyDefaults.DefaultCompanyId;
+    public string CompanyName { get; set; } = CompanyDefaults.DefaultCompanyName;
     public string Email { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string Organization { get; set; } = "";
