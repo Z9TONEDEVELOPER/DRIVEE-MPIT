@@ -34,6 +34,10 @@ builder.Services.AddHttpClient("llm");
 builder.Services.AddSingleton<TenantContext>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<AuditLogService>();
+builder.Services.AddSingleton<OperationalMetricsService>();
+builder.Services.AddSingleton<QueryLoadControl>();
+builder.Services.AddSingleton<LoadCacheService>();
+builder.Services.AddSingleton<AnalyticsRegressionService>();
 builder.Services.AddSingleton<DataSourceService>();
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
@@ -139,7 +143,8 @@ app.MapPost("/api/query", async (
         queryText,
         request.History,
         request.PreviousIntent,
-        cancellationToken);
+        cancellationToken,
+        userKey: GetApiUserName(context));
     result.UserQuery = queryText;
     audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "query.run", "query", success: string.IsNullOrWhiteSpace(result.Error), details: queryText);
     return Results.Ok(result);
@@ -198,7 +203,7 @@ app.MapPost("/api/reports/{id:int}/rerun", (
         return Results.NotFound(new { error = "Report not found." });
 
     using var tenantScope = tenantContext.Use(companyId);
-    var result = engine.ReplayFromReport(report.IntentJson);
+    var result = engine.ReplayFromReport(report.IntentJson, userKey: GetApiUserName(context));
     result.UserQuery = report.UserQuery;
     audit.Record(companyId, GetApiUserId(context), GetApiUserName(context), "report.rerun", "report", id.ToString(), success: true);
     return Results.Ok(result);

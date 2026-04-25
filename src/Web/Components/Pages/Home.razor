@@ -39,13 +39,19 @@
 
         <button class="bi-new-chat" @onclick="ClearChat">＋ Новый чат</button>
 
-        <div class="bi-section-title">Шаблоны запросов</div>
-        <div class="bi-templates">
-            @foreach (var t in _templates)
-            {
-                <button class="bi-template" @onclick="() => UseTemplate(t)">@t</button>
-            }
-        </div>
+        <button type="button" class="bi-section-toggle" @onclick="ToggleTemplates" aria-expanded="@_templatesOpen">
+            <span>Шаблоны запросов</span>
+            <span class="bi-section-toggle-ico">@(_templatesOpen ? "−" : "+")</span>
+        </button>
+        @if (_templatesOpen)
+        {
+            <div class="bi-templates">
+                @foreach (var t in _templates)
+                {
+                    <button class="bi-template" @onclick="() => UseTemplate(t)">@t</button>
+                }
+            </div>
+        }
 
         <div class="bi-section-title">Сохранённые отчёты</div>
         <div class="bi-reports-list">
@@ -182,6 +188,7 @@
     private int? _userId;
     private bool _isAdmin;
     private bool _identityLoaded;
+    private bool _templatesOpen;
     private int? _openedReportId;
     private int _lastRenderedCount;
 
@@ -275,7 +282,7 @@
                 .Select(m => m.Result!.Intent)
                 .LastOrDefault();
 
-            var pr = await Engine.RunAsync(q, history, prevIntent, companyId: _companyId);
+            var pr = await Engine.RunAsync(q, history, prevIntent, companyId: _companyId, userKey: _username);
             pr.UserQuery = q;
             Audit.Record(_companyId, _userId, _username, "query.run", "query", success: string.IsNullOrWhiteSpace(pr.Error), details: q);
 
@@ -311,7 +318,13 @@
         }
     }
 
-    private void UseTemplate(string t) => _query = t;
+    private void ToggleTemplates() => _templatesOpen = !_templatesOpen;
+
+    private void UseTemplate(string t)
+    {
+        _query = t;
+        _templatesOpen = false;
+    }
 
     private List<ChatTurn> BuildHistory()
     {
@@ -360,7 +373,7 @@
         _messages.Add(new ChatMsg { Role = "user", Text = $"[↻ отчёт] {r.UserQuery}" });
         try
         {
-            var pr = Engine.ReplayFromReport(r.IntentJson, companyId: _companyId);
+            var pr = Engine.ReplayFromReport(r.IntentJson, companyId: _companyId, userKey: _username);
             pr.UserQuery = r.UserQuery;
             Audit.Record(_companyId, _userId, _username, "report.rerun", "report", id.ToString(), success: true);
             _messages.Add(new ChatMsg
@@ -401,6 +414,226 @@
 
     private static string GetInsightTabClass(WorkspaceChatMessage m, string tab) =>
         string.Equals(m.InsightTab, tab, StringComparison.Ordinal) ? "bi-insight-tab active" : "bi-insight-tab";
+
+    private static string GetCorrectionTabClass(WorkspaceChatMessage m) =>
+        m.CorrectionOpen ? "bi-insight-tab active" : "bi-insight-tab";
+
+    private void ToggleCorrection(WorkspaceChatMessage message)
+    {
+        if (message.Result?.Intent == null)
+            return;
+
+        if (!message.CorrectionOpen)
+            InitializeCorrection(message);
+
+        message.CorrectionOpen = !message.CorrectionOpen;
+        message.CorrectionError = null;
+    }
+
+    private void ApplyCorrection(WorkspaceChatMessage message)
+    {
+        if (_busy || message.Result?.Intent == null)
+            return;
+
+        var userQuery = message.Result.UserQuery;
+        _busy = true;
+        _thinkingLabel = "Пересобираю SQL…";
+        WorkspaceState.ThinkingLabel = _thinkingLabel;
+        WorkspaceState.NotifyChanged();
+
+        try
+        {
+            var correctedIntent = CloneIntent(message.Result.Intent);
+            correctedIntent.Metric = string.IsNullOrWhiteSpace(message.CorrectionMetric)
+                ? correctedIntent.Metric
+                : message.CorrectionMetric.Trim();
+            correctedIntent.Dimensions = string.IsNullOrWhiteSpace(message.CorrectionDimension)
+                ? new List<string>()
+                : new List<string> { message.CorrectionDimension.Trim() };
+            correctedIntent.GroupBy = correctedIntent.Dimensions.FirstOrDefault();
+            correctedIntent.Visualization = string.IsNullOrWhiteSpace(message.CorrectionVisualization)
+                ? correctedIntent.Visualization
+                : message.CorrectionVisualization.Trim();
+            correctedIntent.VisualizationHint = correctedIntent.Visualization;
+            correctedIntent.Sort.Clear();
+            correctedIntent.ExtraFields = null;
+            ApplyCorrectedPeriod(correctedIntent, message.CorrectionPeriod);
+
+            var correctedResult = Engine.RunCorrectedIntent(
+                correctedIntent,
+                userQuery,
+                companyId: _companyId,
+                userKey: _username);
+            correctedResult.UserQuery = userQuery;
+
+            var ok = string.IsNullOrWhiteSpace(correctedResult.Error);
+            Audit.Record(
+                _companyId,
+                _userId,
+                _username,
+                "query.correct_intent",
+                "query",
+                success: ok,
+                details: JsonSerializer.Serialize(correctedIntent));
+
+            if (!ok)
+            {
+                message.CorrectionError = correctedResult.Error;
+                return;
+            }
+
+            message.Result = correctedResult;
+            message.Visualization = correctedResult.Visualization;
+            message.ReportName = BuildReportName(correctedResult);
+            message.SavedAs = null;
+            message.CorrectionOpen = false;
+            message.CorrectionError = null;
+            InitializeCorrection(message, overwrite: true);
+        }
+        catch (Exception exception)
+        {
+            message.CorrectionError = exception.Message;
+            Audit.Record(_companyId, _userId, _username, "query.correct_intent", "query", success: false, details: exception.Message);
+        }
+        finally
+        {
+            _busy = false;
+            WorkspaceState.ThinkingLabel = "\u0414\u0443\u043c\u0430\u044e\u2026";
+            _thinkingLabel = WorkspaceState.ThinkingLabel;
+            WorkspaceState.NotifyChanged();
+        }
+    }
+
+    private static void InitializeCorrection(WorkspaceChatMessage message, bool overwrite = false)
+    {
+        var intent = message.Result?.Intent;
+        if (intent == null)
+            return;
+
+        if (overwrite || string.IsNullOrWhiteSpace(message.CorrectionMetric))
+            message.CorrectionMetric = intent.Metric ?? "orders_count";
+        if (overwrite || string.IsNullOrWhiteSpace(message.CorrectionDimension))
+            message.CorrectionDimension = intent.GroupBy ?? intent.Dimensions.FirstOrDefault() ?? "";
+        if (overwrite || string.IsNullOrWhiteSpace(message.CorrectionPeriod))
+            message.CorrectionPeriod = BuildCorrectionPeriod(intent);
+        if (overwrite || string.IsNullOrWhiteSpace(message.CorrectionVisualization))
+            message.CorrectionVisualization = message.Visualization ?? intent.Visualization ?? intent.VisualizationHint ?? "table";
+    }
+
+    private static string BuildCorrectionPeriod(QueryIntent intent)
+    {
+        if (intent.Periods?.Any(period => period.Equals("current_month", StringComparison.OrdinalIgnoreCase)) == true &&
+            intent.Periods.Any(period => period.Equals("previous_month", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "current_previous_month";
+        }
+
+        if (!string.IsNullOrWhiteSpace(intent.DateRange?.Type))
+        {
+            return intent.DateRange.Value.HasValue
+                ? $"{intent.DateRange.Type}:{intent.DateRange.Value.Value}"
+                : intent.DateRange.Type;
+        }
+
+        return intent.Period ?? "";
+    }
+
+    private static void ApplyCorrectedPeriod(QueryIntent intent, string? period)
+    {
+        intent.Intent = QueryIntentKinds.MetricQuery;
+        intent.Period = null;
+        intent.Periods = null;
+        intent.DateRange = null;
+        intent.Comparison = null;
+
+        if (string.IsNullOrWhiteSpace(period))
+            return;
+
+        period = period.Trim();
+        if (period.Equals("current_previous_month", StringComparison.OrdinalIgnoreCase))
+        {
+            intent.Intent = QueryIntentKinds.ComparePeriods;
+            intent.Periods = new List<string> { "current_month", "previous_month" };
+            return;
+        }
+
+        if (period.StartsWith("last_n_days:", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(period.Split(':', 2)[1], out var days))
+        {
+            intent.Period = $"last_{days}_days";
+            intent.DateRange = new QueryDateRange
+            {
+                Type = "last_n_days",
+                Value = days,
+                Unit = "day",
+                DateColumn = SemanticLayer.DefaultDateColumn
+            };
+            return;
+        }
+
+        intent.Period = period;
+        intent.DateRange = new QueryDateRange
+        {
+            Type = period,
+            DateColumn = SemanticLayer.DefaultDateColumn
+        };
+    }
+
+    private static QueryIntent CloneIntent(QueryIntent intent) => new()
+    {
+        Kind = QueryIntentKinds.Query,
+        Intent = intent.Intent,
+        Metric = intent.Metric,
+        Aggregation = intent.Aggregation,
+        Dimensions = intent.Dimensions.ToList(),
+        Filters = intent.Filters.Select(CloneFilter).ToList(),
+        DateRange = CloneDateRange(intent.DateRange),
+        Sort = intent.Sort.Select(CloneSort).ToList(),
+        Limit = intent.Limit,
+        Visualization = intent.Visualization,
+        Source = intent.Source,
+        Comparison = CloneComparison(intent.Comparison),
+        Confidence = Math.Max(intent.Confidence, 0.95),
+        Explanation = intent.Explanation,
+        GroupBy = intent.GroupBy,
+        Period = intent.Period,
+        Periods = intent.Periods?.ToList(),
+        VisualizationHint = intent.VisualizationHint
+    };
+
+    private static IntentFilter CloneFilter(IntentFilter filter) => new()
+    {
+        Field = filter.Field,
+        Operator = filter.Operator,
+        Value = filter.Value
+    };
+
+    private static QuerySort CloneSort(QuerySort sort) => new()
+    {
+        Field = sort.Field,
+        Direction = sort.Direction
+    };
+
+    private static QueryDateRange? CloneDateRange(QueryDateRange? range) => range == null
+        ? null
+        : new QueryDateRange
+        {
+            Type = range.Type,
+            Value = range.Value,
+            Unit = range.Unit,
+            Start = range.Start,
+            End = range.End,
+            DateColumn = range.DateColumn,
+            Label = range.Label
+        };
+
+    private static QueryComparison? CloneComparison(QueryComparison? comparison) => comparison == null
+        ? null
+        : new QueryComparison
+        {
+            Mode = comparison.Mode,
+            Periods = comparison.Periods.Select(CloneDateRange).Where(range => range != null).Cast<QueryDateRange>().ToList()
+        };
 
     private static string SuggestName(PipelineResult pr)
     {
@@ -532,7 +765,25 @@
                 builder.CloseElement();
             }
 
+            if (pr.Intent != null)
+            {
+                builder.OpenElement(seq++, "button");
+                builder.AddAttribute(seq++, "type", "button");
+                builder.AddAttribute(seq++, "class", GetCorrectionTabClass(m));
+                builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => ToggleCorrection(m)));
+                builder.AddContent(seq++, "\u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0438\u043d\u0442\u0435\u0440\u043f\u0440\u0435\u0442\u0430\u0446\u0438\u044e");
+                builder.CloseElement();
+            }
+
             builder.CloseElement();
+        }
+
+        if (m.CorrectionOpen && pr.Intent != null)
+        {
+            builder.OpenComponent<IntentCorrectionPanel>(seq++);
+            builder.AddAttribute(seq++, "Message", m);
+            builder.AddAttribute(seq++, "OnApply", EventCallback.Factory.Create<WorkspaceChatMessage>(this, ApplyCorrection));
+            builder.CloseComponent();
         }
 
         // Reasoning trail — always visible

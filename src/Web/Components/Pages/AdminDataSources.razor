@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @inject DataSourceService DataSources
 @inject LlmSettingsService LlmSettingsService
+@inject AnalyticsRegressionService AnalyticsRegression
 @inject AuditLogService Audit
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -97,6 +98,46 @@
                             {
                                 <div class="admin-error compact">Перед выбором GigaChat добавьте AuthorizationKey через dotnet user-secrets или production secret storage.</div>
                             }
+                        }
+                    </div>
+
+                    <div class="bi-card analytics-checks">
+                        <div class="analytics-checks-head">
+                            <div>
+                                <div class="analytics-checks-title">NL→SQL regression</div>
+                                <div class="analytics-checks-sub">Проверка типовых запросов: выручка за этот и прошлый месяц, доля отмен за 30 дней, топ городов по отменам.</div>
+                            </div>
+                            <button type="button" class="bi-btn ghost" @onclick="RunRegressionChecks" disabled="@(_busy || _regressionRunning)">
+                                @(_regressionRunning ? "Проверяю…" : "Запустить проверку")
+                            </button>
+                        </div>
+
+                        @if (_regressionResult != null)
+                        {
+                            <div class="@(_regressionResult.Passed ? "analytics-checks-status ok" : "analytics-checks-status bad")">
+                                @(_regressionResult.Passed
+                                    ? $"Все проверки прошли: {_regressionResult.PassedCount}/{_regressionResult.Cases.Count}."
+                                    : $"Есть ошибки: {_regressionResult.PassedCount}/{_regressionResult.Cases.Count} прошли.")
+                            </div>
+
+                            <div class="analytics-checks-list">
+                                @foreach (var item in _regressionResult.Cases)
+                                {
+                                    <div class="analytics-check-item @(item.Passed ? "ok" : "bad")">
+                                        <div class="analytics-check-main">
+                                            <div class="analytics-check-query">@item.Query</div>
+                                            <div class="analytics-check-meta">
+                                                metric: @(item.Metric ?? "—") · group: @(item.Dimensions.Count == 0 ? "—" : string.Join(", ", item.Dimensions)) · period: @(item.Period ?? "—")
+                                            </div>
+                                        </div>
+                                        <span class="analytics-check-badge">@(item.Passed ? "ok" : "fail")</span>
+                                        @if (item.Errors.Count > 0)
+                                        {
+                                            <div class="analytics-check-errors">@string.Join("; ", item.Errors)</div>
+                                        }
+                                    </div>
+                                }
+                            </div>
                         }
                     </div>
                 </section>
@@ -272,6 +313,8 @@
     private string? _error;
     private LlmSettings? _llmSettings;
     private string _selectedLlmProvider = LlmProviders.Local;
+    private bool _regressionRunning;
+    private AnalyticsRegressionRunResult? _regressionResult;
 
     protected override async Task OnInitializedAsync()
     {
@@ -302,6 +345,39 @@
             AuditAdmin("llm_settings.update", "llm_settings", details: _llmSettings.Provider);
             _notice = $"LLM provider сохранён: {_llmSettings.Provider}.";
         });
+    }
+
+    private async Task RunRegressionChecks()
+    {
+        if (_busy || _regressionRunning)
+            return;
+
+        _busy = true;
+        _regressionRunning = true;
+        _notice = null;
+        _error = null;
+        try
+        {
+            _regressionResult = await AnalyticsRegression.RunAsync(_companyId);
+            AuditAdmin(
+                "analytics_regression.run",
+                "analytics_regression",
+                success: _regressionResult.Passed,
+                details: $"{_regressionResult.PassedCount}/{_regressionResult.Cases.Count}");
+            _notice = _regressionResult.Passed
+                ? "NL→SQL проверки прошли."
+                : "NL→SQL проверки нашли ошибки интерпретации.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            _error = exception.Message;
+            AuditAdmin("analytics_regression.run", "analytics_regression", success: false, details: exception.Message);
+        }
+        finally
+        {
+            _regressionRunning = false;
+            _busy = false;
+        }
     }
 
     private void NewSource()

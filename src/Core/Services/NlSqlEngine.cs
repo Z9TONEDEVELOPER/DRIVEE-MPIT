@@ -19,6 +19,8 @@ public class NlSqlEngine
     private readonly ExplainEngine _explainEngine;
     private readonly QueryExecutor _queryExecutor;
     private readonly TenantContext _tenantContext;
+    private readonly QueryLoadControl _loadControl;
+    private readonly OperationalMetricsService _metrics;
     private readonly ILogger<NlSqlEngine> _logger;
 
     public NlSqlEngine(
@@ -29,6 +31,8 @@ public class NlSqlEngine
         ExplainEngine explainEngine,
         QueryExecutor queryExecutor,
         TenantContext tenantContext,
+        QueryLoadControl loadControl,
+        OperationalMetricsService metrics,
         ILogger<NlSqlEngine> logger)
     {
         _llmService = llmService;
@@ -38,6 +42,8 @@ public class NlSqlEngine
         _explainEngine = explainEngine;
         _queryExecutor = queryExecutor;
         _tenantContext = tenantContext;
+        _loadControl = loadControl;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -46,14 +52,23 @@ public class NlSqlEngine
         IReadOnlyList<ChatTurn>? history = null,
         QueryIntent? previousIntent = null,
         CancellationToken cancellationToken = default,
-        int? companyId = null)
+        int? companyId = null,
+        string? userKey = null)
     {
         using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
         var pipelineResult = new PipelineResult { UserQuery = userQuery };
         var totalStopwatch = Stopwatch.StartNew();
+        var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
 
         try
         {
+            if (!_loadControl.TryAcquire(effectiveCompanyId, userKey, out var retryAfter))
+            {
+                _metrics.RecordRateLimited(effectiveCompanyId, userKey);
+                pipelineResult.Error = BuildRateLimitMessage(retryAfter);
+                return pipelineResult;
+            }
+
             if (RequiresWriteAccess(userQuery))
             {
                 pipelineResult.IsChat = true;
@@ -154,6 +169,11 @@ public class NlSqlEngine
                 "Pipeline timing: stage=total elapsed_ms={ElapsedMs} has_error={HasError}",
                 totalStopwatch.ElapsedMilliseconds,
                 !string.IsNullOrWhiteSpace(pipelineResult.Error));
+            _metrics.RecordQuery(
+                effectiveCompanyId,
+                userKey,
+                string.IsNullOrWhiteSpace(pipelineResult.Error),
+                totalStopwatch.ElapsedMilliseconds);
         }
 
         return pipelineResult;
@@ -162,9 +182,29 @@ public class NlSqlEngine
     private static bool RequiresWriteAccess(string userQuery) =>
         !string.IsNullOrWhiteSpace(userQuery) && WriteIntentPattern.IsMatch(userQuery);
 
-    public PipelineResult ReplayFromReport(string intentJson, CancellationToken cancellationToken = default, int? companyId = null)
+    private static string BuildRateLimitMessage(TimeSpan retryAfter) =>
+        $"Too many analytics requests. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} sec.";
+
+    public PipelineResult ReplayFromReport(
+        string intentJson,
+        CancellationToken cancellationToken = default,
+        int? companyId = null,
+        string? userKey = null)
     {
         using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
+        var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
+        var stopwatch = Stopwatch.StartNew();
+        if (!_loadControl.TryAcquire(effectiveCompanyId, userKey, out var retryAfter))
+        {
+            stopwatch.Stop();
+            _metrics.RecordRateLimited(effectiveCompanyId, userKey);
+            _metrics.RecordQuery(effectiveCompanyId, userKey, false, stopwatch.ElapsedMilliseconds);
+            return new PipelineResult
+            {
+                Error = BuildRateLimitMessage(retryAfter)
+            };
+        }
+
         var storedIntent = JsonSerializer.Deserialize<QueryIntent>(intentJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
@@ -192,6 +232,72 @@ public class NlSqlEngine
             "SQL-запрос",
             "SQL пересобран кодом из сохранённого intent.",
             pipelineResult.Sql));
+
+        stopwatch.Stop();
+        _metrics.RecordQuery(effectiveCompanyId, userKey, true, stopwatch.ElapsedMilliseconds);
+        return pipelineResult;
+    }
+
+    public PipelineResult RunCorrectedIntent(
+        QueryIntent correctedIntent,
+        string userQuery,
+        CancellationToken cancellationToken = default,
+        int? companyId = null,
+        string? userKey = null)
+    {
+        using var tenantScope = companyId.HasValue ? _tenantContext.Use(companyId.Value) : null;
+        var pipelineResult = new PipelineResult { UserQuery = userQuery };
+        var effectiveCompanyId = companyId ?? _tenantContext.CompanyId;
+        var stopwatch = Stopwatch.StartNew();
+
+        if (!_loadControl.TryAcquire(effectiveCompanyId, userKey, out var retryAfter))
+        {
+            stopwatch.Stop();
+            _metrics.RecordRateLimited(effectiveCompanyId, userKey);
+            pipelineResult.Error = BuildRateLimitMessage(retryAfter);
+            _metrics.RecordQuery(effectiveCompanyId, userKey, false, stopwatch.ElapsedMilliseconds);
+            return pipelineResult;
+        }
+
+        try
+        {
+            correctedIntent.Kind = QueryIntentKinds.Query;
+            correctedIntent.Confidence = Math.Max(correctedIntent.Confidence, 0.95);
+            correctedIntent.Explanation = "Intent corrected by user in UI.";
+
+            var validatedIntent = _intentValidator.ValidateStoredIntent(correctedIntent);
+            var builtSql = _sqlBuilder.Build(validatedIntent);
+            var explainResult = _explainEngine.Build(validatedIntent, builtSql, userQuery);
+
+            pipelineResult.Intent = validatedIntent.NormalizedIntent;
+            pipelineResult.Confidence = validatedIntent.NormalizedIntent.Confidence;
+            pipelineResult.Visualization = validatedIntent.Visualization;
+            pipelineResult.StructuredExplain = explainResult.Structured;
+            pipelineResult.Explain = explainResult.Summary;
+            pipelineResult.TechnicalExplain = explainResult.Technical;
+            pipelineResult.ReasoningTrail = explainResult.Trail;
+            pipelineResult.Sql = FormatSqlForDisplay(builtSql.Sql, builtSql.Parameters);
+            pipelineResult.Result = _queryExecutor.Execute(builtSql, validatedIntent);
+            pipelineResult.ReasoningTrail.Add(new ReasoningStep(
+                "SQL",
+                "SQL-запрос",
+                "SQL пересобран после ручного исправления интерпретации.",
+                pipelineResult.Sql));
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Corrected intent execution failed.");
+            pipelineResult.Error = exception.Message;
+        }
+        finally
+        {
+            stopwatch.Stop();
+            _metrics.RecordQuery(
+                effectiveCompanyId,
+                userKey,
+                string.IsNullOrWhiteSpace(pipelineResult.Error),
+                stopwatch.ElapsedMilliseconds);
+        }
 
         return pipelineResult;
     }

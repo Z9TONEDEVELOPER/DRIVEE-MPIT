@@ -1,0 +1,148 @@
+<div class="bi-correction-panel">
+    <div class="bi-correction-title">Исправить интерпретацию</div>
+
+    @if (!string.IsNullOrWhiteSpace(Message.CorrectionError))
+    {
+        <div class="bi-correction-error">@Message.CorrectionError</div>
+    }
+
+    <div class="bi-correction-grid">
+        <label class="bi-correction-field">
+            Метрика
+            <select @bind="Message.CorrectionMetric">
+                @foreach (var option in MetricOptions)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        </label>
+
+        <label class="bi-correction-field">
+            Группировка
+            <select @bind="Message.CorrectionDimension">
+                @foreach (var option in DimensionOptions)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        </label>
+
+        <label class="bi-correction-field">
+            Период
+            <select @bind="Message.CorrectionPeriod">
+                @foreach (var option in PeriodOptions)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        </label>
+
+        <label class="bi-correction-field">
+            Вид
+            <select @bind="Message.CorrectionVisualization">
+                @foreach (var option in VisualizationOptions)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        </label>
+    </div>
+
+    <div class="bi-correction-actions">
+        <button type="button" class="bi-btn" @onclick="Apply">Применить</button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public WorkspaceChatMessage Message { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<WorkspaceChatMessage> OnApply { get; set; }
+
+    private static readonly CorrectionOption[] MetricOptions =
+    {
+        new("orders_count", "Количество заказов"),
+        new("revenue_sum", "Выручка"),
+        new("cancellation_rate", "Доля отмен"),
+        new("avg_order_price", "Средний чек"),
+        new("avg_trip_duration", "Средняя длительность"),
+        new("avg_distance_km", "Средняя дистанция")
+    };
+
+    private static readonly CorrectionOption[] DimensionOptions =
+    {
+        new("", "Без группировки"),
+        new("day", "По дням"),
+        new("week", "По неделям"),
+        new("month", "По месяцам"),
+        new("hour", "По часам"),
+        new("weekday", "По дням недели"),
+        new("city", "По городам"),
+        new("status_order", "По статусам")
+    };
+
+    private static readonly CorrectionOption[] PeriodOptions =
+    {
+        new("", "Без периода"),
+        new("last_n_days:3", "Последние 3 дня"),
+        new("last_n_days:7", "Последние 7 дней"),
+        new("last_n_days:30", "Последние 30 дней"),
+        new("current_month", "Этот месяц"),
+        new("previous_month", "Прошлый месяц"),
+        new("current_previous_month", "Этот и прошлый месяц"),
+        new("current_week", "Эта неделя"),
+        new("previous_week", "Прошлая неделя"),
+        new("current_year", "Этот год"),
+        new("previous_year", "Прошлый год")
+    };
+
+    private static readonly CorrectionOption[] VisualizationOptions =
+    {
+        new("table", "Таблица"),
+        new("bar", "Bar"),
+        new("line", "Line"),
+        new("pie", "Pie")
+    };
+
+    protected override void OnParametersSet()
+    {
+        var intent = Message.Result?.Intent;
+        if (intent == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(Message.CorrectionMetric))
+            Message.CorrectionMetric = intent.Metric ?? "orders_count";
+
+        if (string.IsNullOrWhiteSpace(Message.CorrectionDimension))
+            Message.CorrectionDimension = intent.GroupBy ?? intent.Dimensions.FirstOrDefault() ?? "";
+
+        if (string.IsNullOrWhiteSpace(Message.CorrectionPeriod))
+            Message.CorrectionPeriod = BuildPeriodValue(intent);
+
+        if (string.IsNullOrWhiteSpace(Message.CorrectionVisualization))
+            Message.CorrectionVisualization = Message.Visualization ?? intent.Visualization ?? intent.VisualizationHint ?? "table";
+    }
+
+    private Task Apply() => OnApply.InvokeAsync(Message);
+
+    private static string BuildPeriodValue(QueryIntent intent)
+    {
+        if (intent.Periods?.Any(period => period.Equals("current_month", StringComparison.OrdinalIgnoreCase)) == true &&
+            intent.Periods.Any(period => period.Equals("previous_month", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "current_previous_month";
+        }
+
+        if (!string.IsNullOrWhiteSpace(intent.DateRange?.Type))
+        {
+            return intent.DateRange.Value.HasValue
+                ? $"{intent.DateRange.Type}:{intent.DateRange.Value.Value}"
+                : intent.DateRange.Type;
+        }
+
+        return intent.Period ?? "";
+    }
+
+    private sealed record CorrectionOption(string Value, string Label);
+}

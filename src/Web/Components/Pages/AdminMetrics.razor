@@ -1,0 +1,259 @@
+@page "/admin/metrics"
+@attribute [Authorize(Roles = AppRoles.Admin)]
+@rendermode InteractiveServer
+@inject OperationalMetricsService Metrics
+@inject AuditLogService Audit
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Drivee BI · Metrics</PageTitle>
+
+<div class="bi-workspace">
+    <aside class="bi-sidebar">
+        <div class="bi-brand">
+            <div class="bi-logo">◆</div>
+            <div>
+                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-sub">NL → SQL аналитика</div>
+            </div>
+        </div>
+
+        <div class="bi-user-card">
+            <div class="bi-user-label">Сеанс</div>
+            <div class="bi-user-name">@_displayName</div>
+            <div class="bi-user-meta">@_username · Администратор</div>
+            <form method="post" action="/auth/logout">
+                <button type="submit" class="bi-logout-btn">Выйти</button>
+            </form>
+        </div>
+
+        <SidebarNav Current="metrics" IsAdmin="true" />
+    </aside>
+
+    <main class="bi-chat-main">
+        <header class="bi-chat-header">
+            <div>
+                <h1>Нагрузка и аудит</h1>
+                <div class="bi-tagline">Операционные метрики за последний час, ошибки и последние действия пользователей.</div>
+            </div>
+        </header>
+
+        <div class="bi-reports-body">
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="admin-error">@_error</div>
+            }
+
+            @if (_metrics != null && _auditSummary != null)
+            {
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>Сейчас</h2>
+                            <div class="bi-tagline">Счётчики хранятся в памяти текущего процесса с момента запуска: @FormatDate(_metrics.StartedAt).</div>
+                        </div>
+                        <button type="button" class="bi-btn ghost" @onclick="Refresh">Обновить</button>
+                    </div>
+
+                    <div class="ops-grid">
+                        <div class="ops-card">
+                            <div class="ops-label">Запросы за час</div>
+                            <div class="ops-value">@_metrics.RequestsLastHour</div>
+                            <div class="ops-sub">@_metrics.SuccessfulRequestsLastHour успешно · @_metrics.FailedRequestsLastHour ошибок</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">Активные пользователи</div>
+                            <div class="ops-value">@_auditSummary.ActiveUsersLastDay</div>
+                            <div class="ops-sub">по audit log за 24 часа</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">Rate limit</div>
+                            <div class="ops-value">@_metrics.RateLimitedLastHour</div>
+                            <div class="ops-sub">отклонено за последний час</div>
+                        </div>
+                        <div class="ops-card">
+                            <div class="ops-label">Ошибки действий</div>
+                            <div class="ops-value">@_auditSummary.FailedLastDay</div>
+                            <div class="ops-sub">@_auditSummary.EventsLastDay событий за 24 часа</div>
+                        </div>
+                    </div>
+
+                    <div class="ops-grid ops-grid-secondary">
+                        <div class="ops-card compact">
+                            <div class="ops-label">LLM avg</div>
+                            <div class="ops-value small">@FormatMs(_metrics.AverageLlmMs)</div>
+                            <div class="ops-sub">@_metrics.LlmCallsLastHour вызовов · @_metrics.LlmFailuresLastHour ошибок</div>
+                        </div>
+                        <div class="ops-card compact">
+                            <div class="ops-label">SQL avg</div>
+                            <div class="ops-value small">@FormatMs(_metrics.AverageSqlMs)</div>
+                            <div class="ops-sub">@_metrics.SqlExecutionsLastHour выполнений · @_metrics.SqlFailuresLastHour ошибок</div>
+                        </div>
+                        <div class="ops-card compact">
+                            <div class="ops-label">Total avg</div>
+                            <div class="ops-value small">@FormatMs(_metrics.AverageTotalRequestMs)</div>
+                            <div class="ops-sub">полный NL→SQL pipeline</div>
+                        </div>
+                        <div class="ops-card compact">
+                            <div class="ops-label">Cache hits</div>
+                            <div class="ops-value small">@(_metrics.IntentCacheHitsLastHour + _metrics.ResultCacheHitsLastHour)</div>
+                            <div class="ops-sub">intent @_metrics.IntentCacheHitsLastHour · SQL @_metrics.ResultCacheHitsLastHour</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>График за час</h2>
+                            <div class="bi-tagline">Каждый столбец показывает 5 минут: запросы, ошибки и rate limit.</div>
+                        </div>
+                    </div>
+
+                    <div class="bi-card ops-buckets">
+                        @foreach (var bucket in _metrics.Buckets)
+                        {
+                            <div class="ops-bucket" title="@BuildBucketTitle(bucket)">
+                                <div class="ops-bucket-bars">
+                                    <span class="ops-bucket-bar requests" style="@BuildBucketStyle(bucket.Requests)"></span>
+                                    <span class="ops-bucket-bar errors" style="@BuildBucketStyle(bucket.Errors)"></span>
+                                    <span class="ops-bucket-bar limited" style="@BuildBucketStyle(bucket.RateLimited)"></span>
+                                </div>
+                                <div class="ops-bucket-time">@bucket.To.ToLocalTime().ToString("HH:mm")</div>
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <section class="admin-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>Audit log</h2>
+                            <div class="bi-tagline">Последние действия пользователей: входы, запросы, отчёты, настройки, источники данных и ошибки.</div>
+                        </div>
+                        <div class="audit-filters">
+                            <select class="auth-input" @bind="_actionFilter">
+                                <option value="">Все действия</option>
+                                @foreach (var action in _actions)
+                                {
+                                    <option value="@action">@action</option>
+                                }
+                            </select>
+                            <label class="audit-checkbox">
+                                <input type="checkbox" @bind="_errorsOnly" />
+                                Только ошибки
+                            </label>
+                            <button type="button" class="bi-btn" @onclick="Refresh">Применить</button>
+                        </div>
+                    </div>
+
+                    <div class="bi-card bi-card-table">
+                        @if (_auditEntries.Count == 0)
+                        {
+                            <div class="bi-empty">Событий пока нет.</div>
+                        }
+                        else
+                        {
+                            <table class="bi-table audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Время</th>
+                                        <th>Пользователь</th>
+                                        <th>Действие</th>
+                                        <th>Объект</th>
+                                        <th>Статус</th>
+                                        <th>Детали</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in _auditEntries)
+                                    {
+                                        <tr>
+                                            <td>@FormatDate(item.CreatedAt)</td>
+                                            <td>
+                                                <div class="admin-user-name">@(item.Username ?? "system")</div>
+                                                <div class="admin-user-sub">@(item.UserId?.ToString() ?? "—")</div>
+                                            </td>
+                                            <td><code>@item.Action</code></td>
+                                            <td>
+                                                <div>@item.TargetType</div>
+                                                <div class="admin-user-sub">@(item.TargetId ?? "—")</div>
+                                            </td>
+                                            <td>
+                                                <span class="audit-status @(item.Success ? "ok" : "bad")">@(item.Success ? "ok" : "error")</span>
+                                            </td>
+                                            <td class="audit-details">@DisplayDetails(item.Details)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    </main>
+</div>
+
+@code {
+    private OperationalMetricsSnapshot? _metrics;
+    private AuditLogSummary? _auditSummary;
+    private List<AuditLogEntry> _auditEntries = new();
+    private List<string> _actions = new();
+    private string _username = "";
+    private string _displayName = "";
+    private int _companyId = CompanyDefaults.DefaultCompanyId;
+    private string _actionFilter = "";
+    private bool _errorsOnly;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _username = authState.User.GetUsername();
+        _displayName = authState.User.GetDisplayName();
+        _companyId = authState.User.GetCompanyId();
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        try
+        {
+            _error = null;
+            _metrics = Metrics.GetSnapshot(_companyId);
+            _auditSummary = Audit.GetSummary(_companyId);
+            _actions = Audit.ListActions(_companyId).ToList();
+            _auditEntries = Audit.List(
+                _companyId,
+                200,
+                string.IsNullOrWhiteSpace(_actionFilter) ? null : _actionFilter,
+                _errorsOnly).ToList();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private string BuildBucketStyle(int value)
+    {
+        var max = Math.Max(1, _metrics?.Buckets.Max(bucket => Math.Max(bucket.Requests, Math.Max(bucket.Errors, bucket.RateLimited))) ?? 1);
+        var height = Math.Clamp(value * 100 / max, 4, 100);
+        return $"height:{height}%";
+    }
+
+    private static string BuildBucketTitle(OperationalMetricBucket bucket) =>
+        $"{bucket.From.ToLocalTime():HH:mm}–{bucket.To.ToLocalTime():HH:mm}: запросы {bucket.Requests}, ошибки {bucket.Errors}, rate limit {bucket.RateLimited}";
+
+    private static string FormatMs(double value) => value <= 0 ? "—" : $"{value:0.#} ms";
+
+    private static string FormatDate(DateTimeOffset value) => value.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss");
+
+    private static string DisplayDetails(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "—";
+
+        return value.Length <= 220 ? value : value[..220] + "…";
+    }
+}

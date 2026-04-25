@@ -15,9 +15,15 @@ public class LlmService
     private readonly HttpClient _httpClient;
     private readonly ILogger<LlmService> _logger;
     private readonly LlmSettingsService _settings;
+    private readonly TenantContext _tenantContext;
+    private readonly LoadCacheService _cache;
+    private readonly OperationalMetricsService _metrics;
     private readonly string _endpoint;
     private readonly string _model;
     private readonly bool _usesSimpleChatApi;
+    private readonly SemaphoreSlim _localLlmSemaphore;
+    private readonly SemaphoreSlim _gigaChatSemaphore;
+    private readonly TimeSpan _llmQueueTimeout;
     private readonly int _maxHistoryTurns;
     private readonly int _maxOutputTokens;
     private readonly double _temperature;
@@ -36,14 +42,23 @@ public class LlmService
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         LlmSettingsService settings,
+        TenantContext tenantContext,
+        LoadCacheService cache,
+        OperationalMetricsService metrics,
         ILogger<LlmService> logger)
     {
         _httpClient = httpClientFactory.CreateClient("llm");
         _settings = settings;
+        _tenantContext = tenantContext;
+        _cache = cache;
+        _metrics = metrics;
         _logger = logger;
         _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
         _model = configuration["Llm:Model"] ?? "qwen2.5-coder-7b-instruct";
         _usesSimpleChatApi = _endpoint.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase);
+        _localLlmSemaphore = new SemaphoreSlim(ReadBoundedInt(configuration, "Load:MaxConcurrentLocalLlmRequests", 1, 1, 32));
+        _gigaChatSemaphore = new SemaphoreSlim(ReadBoundedInt(configuration, "Load:MaxConcurrentGigaChatRequests", 4, 1, 64));
+        _llmQueueTimeout = TimeSpan.FromSeconds(ReadBoundedInt(configuration, "Load:LlmQueueTimeoutSeconds", 10, 1, 300));
         _maxHistoryTurns = ReadBoundedInt(configuration, "Llm:MaxHistoryTurns", 2, 0, 8);
         _maxOutputTokens = ReadBoundedInt(configuration, "Llm:MaxOutputTokens", 700, 128, 2_048);
         _temperature = ReadBoundedDouble(configuration, "Llm:Temperature", 0, 0, 1);
@@ -84,12 +99,31 @@ public class LlmService
         }
 
         var provider = _settings.GetProvider();
-        if (string.Equals(provider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase))
+        var cacheKey = LoadCacheService.BuildIntentKey(
+            _tenantContext.CompanyId,
+            provider,
+            string.Equals(provider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) ? _gigaChatModel : _model,
+            userQuery,
+            history);
+        if (_cache.TryGetIntent(cacheKey, out var cachedIntent) && cachedIntent != null)
         {
-            return await InterpretWithGigaChatOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+            _metrics.RecordIntentCacheHit(_tenantContext.CompanyId);
+            _logger.LogInformation("LLM intent cache hit. provider={Provider}, company_id={CompanyId}", provider, _tenantContext.CompanyId);
+            return cachedIntent;
         }
 
-        return await InterpretWithLocalOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+        QueryIntent intent;
+        if (string.Equals(provider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase))
+        {
+            intent = await InterpretWithGigaChatOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+        }
+        else
+        {
+            intent = await InterpretWithLocalOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+        }
+
+        _cache.SetIntent(cacheKey, intent);
+        return intent;
     }
 
     private async Task<QueryIntent> InterpretWithLocalOrFallbackAsync(
@@ -140,25 +174,47 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
-        var payload = BuildLocalPayload(userQuery, systemPrompt, history);
-        using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+        if (!await _localLlmSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
+            throw new InvalidOperationException("Local LLM is busy. Try again in a few seconds.");
+
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
+            var payload = BuildLocalPayload(userQuery, systemPrompt, history);
+            using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
 
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        stopwatch.Stop();
-        _logger.LogInformation(
-            "Local LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
-            stopwatch.ElapsedMilliseconds,
-            (int)response.StatusCode,
-            _model);
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"LLM HTTP {(int)response.StatusCode}: {responseBody}");
+            var stopwatch = Stopwatch.StartNew();
+            var recorded = false;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            stopwatch.Stop();
+            _metrics.RecordLlmCall(_tenantContext.CompanyId, LlmProviders.Local, response.IsSuccessStatusCode, stopwatch.ElapsedMilliseconds);
+            recorded = true;
+            _logger.LogInformation(
+                "Local LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
+                stopwatch.ElapsedMilliseconds,
+                (int)response.StatusCode,
+                _model);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"LLM HTTP {(int)response.StatusCode}: {responseBody}");
 
-        return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
+            try
+            {
+                return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
+            }
+            catch
+            {
+                if (!recorded)
+                    _metrics.RecordLlmCall(_tenantContext.CompanyId, LlmProviders.Local, false, stopwatch.ElapsedMilliseconds);
+                throw;
+            }
+        }
+        finally
+        {
+            _localLlmSemaphore.Release();
+        }
     }
 
     private async Task<QueryIntent?> TryFallbackInterpretAsync(
@@ -190,43 +246,54 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
-        var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
-        var messages = new List<object> { new { role = "system", content = systemPrompt } };
-        if (history != null)
+        if (!await _gigaChatSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
+            throw new InvalidOperationException("GigaChat queue is busy. Try again in a few seconds.");
+
+        try
         {
-            foreach (var turn in history.TakeLast(_maxHistoryTurns))
-                messages.Add(new { role = turn.Role, content = turn.Content });
+            var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
+            var messages = new List<object> { new { role = "system", content = systemPrompt } };
+            if (history != null)
+            {
+                foreach (var turn in history.TakeLast(_maxHistoryTurns))
+                    messages.Add(new { role = turn.Role, content = turn.Content });
+            }
+
+            messages.Add(new { role = "user", content = userQuery });
+            var payload = new
+            {
+                model = _gigaChatModel,
+                messages,
+                temperature = _temperature,
+                max_tokens = _maxOutputTokens
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            stopwatch.Stop();
+            _metrics.RecordLlmCall(_tenantContext.CompanyId, LlmProviders.GigaChat, response.IsSuccessStatusCode, stopwatch.ElapsedMilliseconds);
+            _logger.LogInformation(
+                "GigaChat LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
+                stopwatch.ElapsedMilliseconds,
+                (int)response.StatusCode,
+                _gigaChatModel);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"GigaChat HTTP {(int)response.StatusCode}: {responseBody}");
+
+            return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
         }
-
-        messages.Add(new { role = "user", content = userQuery });
-        var payload = new
+        finally
         {
-            model = _gigaChatModel,
-            messages,
-            temperature = _temperature,
-            max_tokens = _maxOutputTokens
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        stopwatch.Stop();
-        _logger.LogInformation(
-            "GigaChat LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
-            stopwatch.ElapsedMilliseconds,
-            (int)response.StatusCode,
-            _gigaChatModel);
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"GigaChat HTTP {(int)response.StatusCode}: {responseBody}");
-
-        return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
+            _gigaChatSemaphore.Release();
+        }
     }
 
     private async Task<string> GetGigaChatAccessTokenAsync(CancellationToken cancellationToken)

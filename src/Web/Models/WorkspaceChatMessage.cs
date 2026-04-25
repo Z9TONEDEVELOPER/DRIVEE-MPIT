@@ -13,4 +13,10 @@ public class WorkspaceChatMessage
     public string? SavedAs { get; set; }
     public string? InsightTab { get; set; }
     public bool DetailsOpen { get; set; }
+    public bool CorrectionOpen { get; set; }
+    public string CorrectionMetric { get; set; } = "";
+    public string CorrectionDimension { get; set; } = "";
+    public string CorrectionPeriod { get; set; } = "";
+    public string CorrectionVisualization { get; set; } = "";
+    public string? CorrectionError { get; set; }
 }

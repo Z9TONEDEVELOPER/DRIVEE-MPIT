@@ -8,6 +8,10 @@ builder.Services.AddHttpClient("llm");
 builder.Services.AddSingleton<TenantContext>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<AuditLogService>();
+builder.Services.AddSingleton<OperationalMetricsService>();
+builder.Services.AddSingleton<QueryLoadControl>();
+builder.Services.AddSingleton<LoadCacheService>();
+builder.Services.AddSingleton<AnalyticsRegressionService>();
 builder.Services.AddSingleton<DataSourceService>();
 builder.Services.AddSingleton<SemanticLayer>();
 builder.Services.AddSingleton<DatasetSeeder>();
@@ -133,6 +137,66 @@ app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpCo
     }
 }).DisableAntiforgery();
 
+app.MapGet("/api/admin/analytics-regression", async (
+    HttpContext context,
+    AuthTokenService tokens,
+    TenantContext tenantContext,
+    AnalyticsRegressionService regression,
+    AuditLogService audit,
+    CancellationToken cancellationToken) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    using var tenantScope = tenantContext.Use(session.CompanyId);
+    var result = await regression.RunAsync(session.CompanyId, cancellationToken);
+    audit.Record(session.CompanyId, session.Id, session.Username, "analytics_regression.run", "analytics_regression", success: result.Passed, details: $"{result.PassedCount}/{result.Cases.Count}");
+    return Results.Ok(result);
+});
+
+app.MapGet("/api/admin/metrics", (
+    HttpContext context,
+    AuthTokenService tokens,
+    OperationalMetricsService metrics,
+    AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    return Results.Ok(new
+    {
+        metrics = metrics.GetSnapshot(session.CompanyId),
+        audit = audit.GetSummary(session.CompanyId)
+    });
+});
+
+app.MapGet("/api/admin/audit-log", (
+    string? action,
+    bool? errorsOnly,
+    int? limit,
+    HttpContext context,
+    AuthTokenService tokens,
+    AuditLogService audit) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    return Results.Ok(audit.List(
+        session.CompanyId,
+        limit ?? 200,
+        action,
+        errorsOnly == true));
+});
+
 app.MapPost("/api/admin/registration-requests/{id:int}/approve", async (
     int id,
     HttpContext context,
@@ -210,7 +274,7 @@ app.MapPost("/api/query", async (
 
     using var tenantScope = tenantContext.Use(session.CompanyId);
     var queryText = request.Text.Trim();
-    var result = await engine.RunAsync(queryText, request.History, request.PreviousIntent, cancellationToken);
+    var result = await engine.RunAsync(queryText, request.History, request.PreviousIntent, cancellationToken, userKey: session.Username);
     result.UserQuery = queryText;
     audit.Record(session.CompanyId, session.Id, session.Username, "query.run", "query", success: string.IsNullOrWhiteSpace(result.Error), details: queryText);
     return Results.Ok(result);
@@ -263,7 +327,7 @@ app.MapPost("/api/reports/{id:int}/rerun", (int id, HttpContext context, AuthTok
         return Results.NotFound(new { error = "Report not found." });
 
     using var tenantScope = tenantContext.Use(session.CompanyId);
-    var result = engine.ReplayFromReport(report.IntentJson);
+    var result = engine.ReplayFromReport(report.IntentJson, userKey: session.Username);
     result.UserQuery = report.UserQuery;
     audit.Record(session.CompanyId, session.Id, session.Username, "report.rerun", "report", id.ToString(), success: true);
     return Results.Ok(result);
