@@ -84,6 +84,16 @@ public class BiApiClient
             _json,
             ct)) ?? new();
 
+    public async Task<LlmSettings> GetLlmSettingsAsync(CancellationToken ct = default)
+        => (await _http.GetFromJsonAsync<LlmSettings>("/api/admin/llm-settings", _json, ct))!;
+
+    public async Task<LlmSettings> UpdateLlmSettingsAsync(string provider, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("/api/admin/llm-settings", new UpdateLlmSettingsRequest(provider), _json, ct);
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<LlmSettings>(_json, ct))!;
+    }
+
     public async Task<RegistrationDecisionResult> ApproveRegistrationAsync(int id, CancellationToken ct = default)
     {
         var resp = await _http.PostAsync($"/api/admin/registration-requests/{id}/approve", null, ct);

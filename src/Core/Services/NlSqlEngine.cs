@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DriveeDataSpace.Core.Models;
@@ -44,6 +45,7 @@ public class NlSqlEngine
         CancellationToken cancellationToken = default)
     {
         var pipelineResult = new PipelineResult { UserQuery = userQuery };
+        var totalStopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -61,11 +63,14 @@ public class NlSqlEngine
                 return pipelineResult;
             }
 
+            var llmStopwatch = Stopwatch.StartNew();
             var rawIntent = await _llmService.InterpretAsync(
                 userQuery,
                 PromptTemplates.SystemPrompt(_semanticLayer),
                 history,
                 cancellationToken);
+            llmStopwatch.Stop();
+            _logger.LogInformation("Pipeline timing: stage=llm elapsed_ms={ElapsedMs}", llmStopwatch.ElapsedMilliseconds);
 
             var validation = _intentValidator.ValidateParsedIntent(rawIntent, userQuery, previousIntent);
             pipelineResult.Intent = validation.NormalizedIntent;
@@ -86,8 +91,11 @@ public class NlSqlEngine
                 throw new InvalidOperationException("Validated intent is missing.");
 
             var validatedIntent = validation.ValidatedIntent;
+            var sqlBuildStopwatch = Stopwatch.StartNew();
             var builtSql = _sqlBuilder.Build(validatedIntent);
             EnsureDifferentIntentsProduceDifferentSql(previousIntent, validatedIntent, builtSql);
+            sqlBuildStopwatch.Stop();
+            _logger.LogInformation("Pipeline timing: stage=sql_build elapsed_ms={ElapsedMs}", sqlBuildStopwatch.ElapsedMilliseconds);
 
             _logger.LogInformation("Validated intent: {Intent}", JsonSerializer.Serialize(validatedIntent.NormalizedIntent));
             _logger.LogInformation("Generated SQL: {Sql}", builtSql.Sql);
@@ -113,7 +121,19 @@ public class NlSqlEngine
                     $"Низкая уверенность интерпретации ({validatedIntent.NormalizedIntent.Confidence:P0}). Проверьте, как система поняла запрос.");
             }
 
-            pipelineResult.Result = _queryExecutor.Execute(builtSql, validatedIntent);
+            var sqlExecuteStopwatch = Stopwatch.StartNew();
+            try
+            {
+                pipelineResult.Result = _queryExecutor.Execute(builtSql, validatedIntent);
+            }
+            finally
+            {
+                sqlExecuteStopwatch.Stop();
+                _logger.LogInformation(
+                    "Pipeline timing: stage=sql_execute elapsed_ms={ElapsedMs} rows={Rows}",
+                    sqlExecuteStopwatch.ElapsedMilliseconds,
+                    pipelineResult.Result?.RowCount);
+            }
             if (pipelineResult.Result.RowCount == 0)
                 pipelineResult.Warnings.Add("Запрос выполнен, но данных по выбранным условиям нет.");
         }
@@ -121,6 +141,14 @@ public class NlSqlEngine
         {
             _logger.LogError(exception, "NL→SQL pipeline failed.");
             pipelineResult.Error = exception.Message;
+        }
+        finally
+        {
+            totalStopwatch.Stop();
+            _logger.LogInformation(
+                "Pipeline timing: stage=total elapsed_ms={ElapsedMs} has_error={HasError}",
+                totalStopwatch.ElapsedMilliseconds,
+                !string.IsNullOrWhiteSpace(pipelineResult.Error));
         }
 
         return pipelineResult;

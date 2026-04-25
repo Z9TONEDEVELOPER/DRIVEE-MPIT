@@ -38,6 +38,7 @@ builder.Services.AddSingleton<SqlBuilder>();
 builder.Services.AddSingleton<SqlGuard>();
 builder.Services.AddSingleton<QueryExecutor>();
 builder.Services.AddSingleton<ExplainEngine>();
+builder.Services.AddSingleton<LlmSettingsService>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<EmailService>();

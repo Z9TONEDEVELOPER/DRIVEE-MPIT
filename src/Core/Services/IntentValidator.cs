@@ -220,6 +220,9 @@ public class IntentValidator
             return false;
         }
 
+        if (string.Equals(metricDefinition.Key, "cancellation_rate", StringComparison.OrdinalIgnoreCase))
+            canonicalIntent.Filters.RemoveAll(filter => string.Equals(filter.Field, "status_order", StringComparison.OrdinalIgnoreCase));
+
         var sourceDefinition = _semanticLayer.ResolveSource(canonicalIntent.Source ?? metricDefinition.Source);
         if (sourceDefinition == null)
         {
@@ -499,7 +502,15 @@ public class IntentValidator
             }
 
             foreach (var filter in preset.Filters.Select(CloneFilter))
+            {
+                if (string.Equals(canonicalIntent.Metric, "cancellation_rate", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(filter.Field, "status_order", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 UpsertFilter(canonicalIntent.Filters, filter);
+            }
 
             canonicalIntent.Visualization ??= preset.Visualization;
         }
@@ -584,6 +595,7 @@ public class IntentValidator
 
         if (HasFilter("status_order") &&
             canonicalIntent.Filters.Count == 0 &&
+            !string.Equals(canonicalIntent.Metric, "cancellation_rate", StringComparison.OrdinalIgnoreCase) &&
             text.Contains("отмен", StringComparison.OrdinalIgnoreCase))
         {
             UpsertFilter(canonicalIntent.Filters, new IntentFilter
@@ -700,14 +712,13 @@ public class IntentValidator
 
     private static List<string> InferLegacyComparisonPeriods(string text)
     {
-        if (text.Contains("этот год", StringComparison.OrdinalIgnoreCase) && text.Contains("прошлый год", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousYear(text))
             return new List<string> { "current_year", "previous_year" };
 
-        if (text.Contains("этот месяц", StringComparison.OrdinalIgnoreCase) && text.Contains("прошлый месяц", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousMonth(text))
             return new List<string> { "current_month", "previous_month" };
 
-        if ((text.Contains("эта неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("текущая неделя", StringComparison.OrdinalIgnoreCase)) &&
-            text.Contains("прошлая неделя", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousWeek(text))
         {
             return new List<string> { "current_week", "previous_week" };
         }

@@ -25,10 +25,23 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AppUserSummary> _users = new();
     [ObservableProperty] private ObservableCollection<RegistrationRequest> _pendingRegistrations = new();
     [ObservableProperty] private string? _adminError;
+    [ObservableProperty] private string? _adminNotice;
+    [ObservableProperty] private LlmSettings? _llmSettings;
+    [ObservableProperty] private string _selectedLlmProvider = LlmProviders.Local;
+    [ObservableProperty] private bool _isSavingLlmSettings;
 
     public bool IsWorkspacePage => CurrentPage == "workspace";
     public bool IsReportsPage => CurrentPage == "reports";
     public bool IsUsersPage => CurrentPage == "users";
+    public IReadOnlyList<string> LlmProviderOptions { get; } = LlmProviders.All;
+    public string CurrentLlmProviderLabel => LlmSettings?.Provider ?? LlmProviders.Local;
+    public string LocalLlmLabel => LlmSettings == null
+        ? "local-model"
+        : $"{LlmSettings.LocalModel} · {LlmSettings.LocalEndpoint}";
+    public string GigaChatLabel => LlmSettings?.GigaChatModel ?? LlmProviders.GigaChat;
+    public string GigaChatSecretStatus => LlmSettings?.IsGigaChatConfigured == true
+        ? "ключ настроен"
+        : "ключ не настроен";
 
     public MainWindowViewModel(BiApiClient api)
     {
@@ -107,6 +120,10 @@ public partial class MainWindowViewModel : ObservableObject
         Chat.Reports.Clear();
         Users.Clear();
         PendingRegistrations.Clear();
+        LlmSettings = null;
+        SelectedLlmProvider = LlmProviders.Local;
+        AdminNotice = null;
+        AdminError = null;
     }
 
     [RelayCommand]
@@ -116,15 +133,51 @@ public partial class MainWindowViewModel : ObservableObject
             return;
 
         AdminError = null;
+        AdminNotice = null;
         try
         {
             Users = new ObservableCollection<AppUserSummary>(await _api.GetUsersAsync());
             PendingRegistrations = new ObservableCollection<RegistrationRequest>(await _api.GetPendingRegistrationsAsync());
+            LlmSettings = await _api.GetLlmSettingsAsync();
+            SelectedLlmProvider = LlmSettings.Provider;
         }
         catch (Exception exception)
         {
             AdminError = $"Не удалось загрузить админские данные: {exception.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task SaveLlmSettingsAsync()
+    {
+        if (!IsAuthenticated || !IsAdmin || IsSavingLlmSettings)
+            return;
+
+        AdminError = null;
+        AdminNotice = null;
+        IsSavingLlmSettings = true;
+        try
+        {
+            LlmSettings = await _api.UpdateLlmSettingsAsync(SelectedLlmProvider);
+            SelectedLlmProvider = LlmSettings.Provider;
+            AdminNotice = $"LLM provider сохранён: {LlmSettings.Provider}.";
+        }
+        catch (Exception exception)
+        {
+            AdminError = $"Не удалось сохранить LLM provider: {exception.Message}";
+        }
+        finally
+        {
+            IsSavingLlmSettings = false;
+        }
+    }
+
+    partial void OnLlmSettingsChanged(LlmSettings? value)
+    {
+        OnPropertyChanged(nameof(CurrentLlmProviderLabel));
+        OnPropertyChanged(nameof(LocalLlmLabel));
+        OnPropertyChanged(nameof(GigaChatLabel));
+        OnPropertyChanged(nameof(GigaChatSecretStatus));
     }
 
     [RelayCommand]

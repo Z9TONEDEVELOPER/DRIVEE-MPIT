@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = AppRoles.Admin)]
 @rendermode InteractiveServer
 @inject DataSourceService DataSources
+@inject LlmSettingsService LlmSettingsService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Drivee BI · Data sources</PageTitle>
@@ -53,6 +54,57 @@
             }
 
             <div class="datasource-layout">
+                <section class="admin-section llm-settings-section">
+                    <div class="admin-section-head">
+                        <div>
+                            <h2>LLM provider</h2>
+                            <div class="bi-tagline">Администратор выбирает, куда отправлять NL-запросы: в локальный сервер или в GigaChat. Секретный ключ здесь не показывается и не хранится в UI.</div>
+                        </div>
+                    </div>
+
+                    <div class="bi-card llm-settings-card">
+                        <div class="llm-provider-row">
+                            <label class="llm-provider-field">
+                                Провайдер
+                                <select class="auth-input" @bind="_selectedLlmProvider" disabled="@_busy">
+                                    @foreach (var provider in LlmProviders.All)
+                                    {
+                                        <option value="@provider">@provider</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="button" class="bi-btn" @onclick="SaveLlmProvider" disabled="@_busy">Сохранить</button>
+                        </div>
+
+                        @if (_llmSettings != null)
+                        {
+                            <div class="llm-facts">
+                                <div class="llm-fact">
+                                    <div class="llm-fact-label">Сейчас выбран</div>
+                                    <div class="llm-fact-value">@_llmSettings.Provider</div>
+                                </div>
+                                <div class="llm-fact">
+                                    <div class="llm-fact-label">Локальный сервер</div>
+                                    <div class="llm-fact-value">@_llmSettings.LocalModel</div>
+                                    <div class="llm-fact-sub">@_llmSettings.LocalEndpoint</div>
+                                </div>
+                                <div class="llm-fact">
+                                    <div class="llm-fact-label">GigaChat</div>
+                                    <div class="llm-fact-value">@_llmSettings.GigaChatModel</div>
+                                    <div class="@(_llmSettings.IsGigaChatConfigured ? "llm-secret-ok" : "llm-secret-missing")">
+                                        @(_llmSettings.IsGigaChatConfigured ? "ключ настроен" : "ключ не настроен")
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (string.Equals(_selectedLlmProvider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) && !_llmSettings.IsGigaChatConfigured)
+                            {
+                                <div class="admin-error compact">Перед выбором GigaChat добавьте AuthorizationKey через dotnet user-secrets или production secret storage.</div>
+                            }
+                        }
+                    </div>
+                </section>
+
                 <section class="admin-section">
                     <div class="admin-section-head">
                         <div>
@@ -220,17 +272,36 @@
     private string _formKey = Guid.NewGuid().ToString("N");
     private string? _notice;
     private string? _error;
+    private LlmSettings? _llmSettings;
+    private string _selectedLlmProvider = LlmProviders.Local;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _username = authState.User.GetUsername();
         _displayName = authState.User.GetDisplayName();
+        LoadLlmSettings();
         Refresh();
         Edit(_items.FirstOrDefault(item => item.IsActive) ?? _items.FirstOrDefault());
     }
 
     private void Refresh() => _items = DataSources.List();
+
+    private void LoadLlmSettings()
+    {
+        _llmSettings = LlmSettingsService.Get();
+        _selectedLlmProvider = _llmSettings.Provider;
+    }
+
+    private void SaveLlmProvider()
+    {
+        RunAdminAction(() =>
+        {
+            _llmSettings = LlmSettingsService.SetProvider(_selectedLlmProvider);
+            _selectedLlmProvider = _llmSettings.Provider;
+            _notice = $"LLM provider сохранён: {_llmSettings.Provider}.";
+        });
+    }
 
     private void NewSource()
     {

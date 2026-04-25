@@ -15,6 +15,7 @@ builder.Services.AddSingleton<SqlBuilder>();
 builder.Services.AddSingleton<SqlGuard>();
 builder.Services.AddSingleton<QueryExecutor>();
 builder.Services.AddSingleton<ExplainEngine>();
+builder.Services.AddSingleton<LlmSettingsService>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<EmailService>();
@@ -92,6 +93,35 @@ app.MapGet("/api/admin/registration-requests", (string? status, HttpContext cont
 
     return Results.Ok(users.ListRegistrationRequests(status));
 });
+
+app.MapGet("/api/admin/llm-settings", (HttpContext context, AuthTokenService tokens, LlmSettingsService settings) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    return Results.Ok(settings.Get());
+});
+
+app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, HttpContext context, AuthTokenService tokens, LlmSettingsService settings) =>
+{
+    var session = GetCurrentSession(context, tokens);
+    if (session == null)
+        return Results.Unauthorized();
+    if (!IsAdmin(session))
+        return Results.Forbid();
+
+    try
+    {
+        return Results.Ok(settings.SetProvider(request.Provider));
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery();
 
 app.MapPost("/api/admin/registration-requests/{id:int}/approve", async (
     int id,

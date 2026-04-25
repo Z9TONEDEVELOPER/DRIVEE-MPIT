@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,9 +14,15 @@ public class LlmService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<LlmService> _logger;
+    private readonly LlmSettingsService _settings;
     private readonly string _endpoint;
     private readonly string _model;
     private readonly bool _usesSimpleChatApi;
+    private readonly int _maxHistoryTurns;
+    private readonly int _maxOutputTokens;
+    private readonly double _temperature;
+    private readonly bool _fastHeuristicEnabled;
+    private readonly double _fastHeuristicConfidenceThreshold;
     private readonly string _fallbackProvider;
     private readonly string _gigaChatAuthKey;
     private readonly string _gigaChatScope;
@@ -25,14 +32,24 @@ public class LlmService
     private string? _gigaChatAccessToken;
     private DateTimeOffset _gigaChatTokenExpiresAt;
 
-    public LlmService(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<LlmService> logger)
+    public LlmService(
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        LlmSettingsService settings,
+        ILogger<LlmService> logger)
     {
         _httpClient = httpClientFactory.CreateClient("llm");
+        _settings = settings;
         _logger = logger;
-        _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
-        _model = configuration["Llm:Model"] ?? "local-model";
+        _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/v1/chat/completions";
+        _model = configuration["Llm:Model"] ?? "qwen2.5-7b-instruct";
         _usesSimpleChatApi = _endpoint.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase);
-        _fallbackProvider = configuration["Llm:Fallback:Provider"] ?? "";
+        _maxHistoryTurns = ReadBoundedInt(configuration, "Llm:MaxHistoryTurns", 2, 0, 8);
+        _maxOutputTokens = ReadBoundedInt(configuration, "Llm:MaxOutputTokens", 700, 128, 2_048);
+        _temperature = ReadBoundedDouble(configuration, "Llm:Temperature", 0, 0, 1);
+        _fastHeuristicEnabled = !bool.TryParse(configuration["Llm:FastHeuristicEnabled"], out var fastHeuristicEnabled) || fastHeuristicEnabled;
+        _fastHeuristicConfidenceThreshold = ReadBoundedDouble(configuration, "Llm:FastHeuristicConfidenceThreshold", 0.7, 0.5, 0.95);
+        _fallbackProvider = LlmProviders.Normalize(configuration["Llm:Fallback:Provider"]);
         _gigaChatAuthKey = configuration["Llm:Fallback:GigaChat:AuthorizationKey"] ?? "";
         _gigaChatScope = configuration["Llm:Fallback:GigaChat:Scope"] ?? "GIGACHAT_API_PERS";
         _gigaChatAuthUrl = configuration["Llm:Fallback:GigaChat:AuthUrl"] ?? "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
@@ -48,32 +65,46 @@ public class LlmService
         IReadOnlyList<ChatTurn>? history = null,
         CancellationToken cancellationToken = default)
     {
-        var payload = BuildPayload(userQuery, systemPrompt, history);
+        if (TryResolveClarificationAnswer(userQuery, history) is { } clarifiedIntent)
+        {
+            _logger.LogInformation(
+                "Clarification answer resolved without LLM. kind={Kind}, confidence={Confidence:P0}",
+                clarifiedIntent.Kind,
+                clarifiedIntent.Confidence);
+            return clarifiedIntent;
+        }
 
+        if (_fastHeuristicEnabled && TryFastHeuristic(userQuery) is { } fastIntent)
+        {
+            _logger.LogInformation(
+                "Fast heuristic resolved query without LLM. kind={Kind}, confidence={Confidence:P0}",
+                fastIntent.Kind,
+                fastIntent.Confidence);
+            return fastIntent;
+        }
+
+        var provider = _settings.GetProvider();
+        if (string.Equals(provider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase))
+        {
+            return await InterpretWithGigaChatOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+        }
+
+        return await InterpretWithLocalOrFallbackAsync(userQuery, systemPrompt, history, cancellationToken);
+    }
+
+    private async Task<QueryIntent> InterpretWithLocalOrFallbackAsync(
+        string userQuery,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn>? history,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-            };
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"LLM HTTP {(int)response.StatusCode}: {responseBody}");
-
-            var content = ExtractContent(responseBody);
-            var json = ExtractJson(content);
-            var parsedIntent = JsonSerializer.Deserialize<QueryIntent>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            return parsedIntent ?? HeuristicFallback(userQuery);
+            return await InterpretWithLocalAsync(userQuery, systemPrompt, history, cancellationToken);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            _logger.LogWarning(exception, "Primary LLM interpretation failed.");
+            _logger.LogWarning(exception, "Local LLM interpretation failed.");
             var fallbackIntent = await TryFallbackInterpretAsync(userQuery, systemPrompt, history, cancellationToken);
             if (fallbackIntent != null)
                 return fallbackIntent;
@@ -83,13 +114,60 @@ public class LlmService
         }
     }
 
+    private async Task<QueryIntent> InterpretWithGigaChatOrFallbackAsync(
+        string userQuery,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn>? history,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_gigaChatAuthKey))
+            throw new InvalidOperationException("GigaChat provider is selected, but Llm:Fallback:GigaChat:AuthorizationKey is empty.");
+
+        try
+        {
+            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            _logger.LogWarning(exception, "GigaChat interpretation failed. Falling back to heuristic parser.");
+            return HeuristicFallback(userQuery);
+        }
+    }
+
+    private async Task<QueryIntent> InterpretWithLocalAsync(
+        string userQuery,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn>? history,
+        CancellationToken cancellationToken)
+    {
+        var payload = BuildLocalPayload(userQuery, systemPrompt, history);
+        using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "Local LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
+            stopwatch.ElapsedMilliseconds,
+            (int)response.StatusCode,
+            _model);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"LLM HTTP {(int)response.StatusCode}: {responseBody}");
+
+        return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
+    }
+
     private async Task<QueryIntent?> TryFallbackInterpretAsync(
         string userQuery,
         string systemPrompt,
         IReadOnlyList<ChatTurn>? history,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(_fallbackProvider, "GigaChat", StringComparison.OrdinalIgnoreCase) ||
+        if (!string.Equals(_fallbackProvider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrWhiteSpace(_gigaChatAuthKey))
         {
             return null;
@@ -97,46 +175,58 @@ public class LlmService
 
         try
         {
-            var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
-            var messages = new List<object> { new { role = "system", content = systemPrompt } };
-            if (history != null)
-            {
-                foreach (var turn in history.TakeLast(8))
-                    messages.Add(new { role = turn.Role, content = turn.Content });
-            }
-
-            messages.Add(new { role = "user", content = userQuery });
-            var payload = new
-            {
-                model = _gigaChatModel,
-                messages,
-                temperature = 0.1
-            };
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"GigaChat HTTP {(int)response.StatusCode}: {responseBody}");
-
-            var content = ExtractContent(responseBody);
-            var json = ExtractJson(content);
-            return JsonSerializer.Deserialize<QueryIntent>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            return await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, cancellationToken);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
             _logger.LogWarning(exception, "GigaChat fallback interpretation failed.");
             return null;
         }
+    }
+
+    private async Task<QueryIntent> InterpretWithGigaChatAsync(
+        string userQuery,
+        string systemPrompt,
+        IReadOnlyList<ChatTurn>? history,
+        CancellationToken cancellationToken)
+    {
+        var accessToken = await GetGigaChatAccessTokenAsync(cancellationToken);
+        var messages = new List<object> { new { role = "system", content = systemPrompt } };
+        if (history != null)
+        {
+            foreach (var turn in history.TakeLast(_maxHistoryTurns))
+                messages.Add(new { role = turn.Role, content = turn.Content });
+        }
+
+        messages.Add(new { role = "user", content = userQuery });
+        var payload = new
+        {
+            model = _gigaChatModel,
+            messages,
+            temperature = _temperature,
+            max_tokens = _maxOutputTokens
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "GigaChat LLM HTTP call completed in {ElapsedMs} ms. status={StatusCode}, model={Model}",
+            stopwatch.ElapsedMilliseconds,
+            (int)response.StatusCode,
+            _gigaChatModel);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"GigaChat HTTP {(int)response.StatusCode}: {responseBody}");
+
+        return ParseIntentResponse(responseBody) ?? HeuristicFallback(userQuery);
     }
 
     private async Task<string> GetGigaChatAccessTokenAsync(CancellationToken cancellationToken)
@@ -232,7 +322,7 @@ public class LlmService
         return responseBody;
     }
 
-    private object BuildPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history)
+    private object BuildLocalPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history)
     {
         if (_usesSimpleChatApi)
         {
@@ -240,14 +330,14 @@ public class LlmService
             {
                 model = _model,
                 system_prompt = systemPrompt,
-                input = BuildFlatInput(userQuery, history)
+                input = BuildFlatInput(userQuery, history, _maxHistoryTurns)
             };
         }
 
         var messages = new List<object> { new { role = "system", content = systemPrompt } };
         if (history != null)
         {
-            foreach (var turn in history.TakeLast(8))
+            foreach (var turn in history.TakeLast(_maxHistoryTurns))
                 messages.Add(new { role = turn.Role, content = turn.Content });
         }
 
@@ -255,20 +345,99 @@ public class LlmService
         return new
         {
             model = _model,
-            temperature = 0.1,
+            temperature = _temperature,
+            max_tokens = _maxOutputTokens,
             messages = messages.ToArray()
         };
     }
 
-    private static string BuildFlatInput(string userQuery, IReadOnlyList<ChatTurn>? history)
+    private static QueryIntent? ParseIntentResponse(string responseBody)
+    {
+        var content = ExtractContent(responseBody);
+        var json = ExtractJson(content);
+        return JsonSerializer.Deserialize<QueryIntent>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+    }
+
+    private QueryIntent? TryFastHeuristic(string userQuery)
+    {
+        var intent = HeuristicFallback(userQuery);
+        if (string.Equals(intent.Kind, QueryIntentKinds.Chat, StringComparison.OrdinalIgnoreCase))
+            return intent;
+
+        return IsFastHeuristicIntent(intent) && intent.Confidence >= _fastHeuristicConfidenceThreshold
+            ? intent
+            : null;
+    }
+
+    private static QueryIntent? TryResolveClarificationAnswer(string userQuery, IReadOnlyList<ChatTurn>? history)
     {
         if (history == null || history.Count == 0)
+            return null;
+
+        for (var i = history.Count - 1; i >= 0; i--)
+        {
+            var turn = history[i];
+            if (!IsAssistantTurn(turn) ||
+                !PeriodTextPatterns.TryResolveClarificationPeriod(userQuery, turn.Content, out var resolvedPeriod))
+            {
+                continue;
+            }
+
+            var previousUserQuery = FindPreviousUserQuery(history, i);
+            if (string.IsNullOrWhiteSpace(previousUserQuery))
+                return null;
+
+            var resolvedQuery = $"{previousUserQuery} {resolvedPeriod}";
+            var intent = HeuristicFallback(resolvedQuery);
+            if (!IsFastHeuristicIntent(intent))
+                return null;
+
+            intent.Confidence = Math.Max(intent.Confidence, 0.75);
+            intent.Explanation = $"Resolved period clarification using previous query and `{resolvedPeriod}`.";
+            return intent;
+        }
+
+        return null;
+    }
+
+    private static string? FindPreviousUserQuery(IReadOnlyList<ChatTurn> history, int beforeIndex)
+    {
+        for (var i = beforeIndex - 1; i >= 0; i--)
+        {
+            if (IsUserTurn(history[i]) && !string.IsNullOrWhiteSpace(history[i].Content))
+                return history[i].Content.Trim();
+        }
+
+        return null;
+    }
+
+    private static bool IsAssistantTurn(ChatTurn turn) =>
+        string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsUserTurn(ChatTurn turn) =>
+        string.Equals(turn.Role, "user", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFastHeuristicIntent(QueryIntent intent) =>
+        string.Equals(intent.Kind, QueryIntentKinds.Query, StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(intent.Metric) &&
+        (intent.Dimensions.Count > 0 ||
+         intent.DateRange != null ||
+         intent.Filters.Count > 0 ||
+         intent.Limit.HasValue ||
+         intent.Periods?.Count > 0);
+
+    private static string BuildFlatInput(string userQuery, IReadOnlyList<ChatTurn>? history, int maxHistoryTurns)
+    {
+        if (history == null || history.Count == 0 || maxHistoryTurns <= 0)
             return userQuery;
 
         var builder = new StringBuilder();
         builder.AppendLine("Conversation context:");
 
-        foreach (var turn in history.TakeLast(8))
+        foreach (var turn in history.TakeLast(maxHistoryTurns))
         {
             builder
                 .Append("- ")
@@ -281,6 +450,16 @@ public class LlmService
         builder.Append("Current user query: ").Append(userQuery);
         return builder.ToString();
     }
+
+    private static int ReadBoundedInt(IConfiguration configuration, string key, int fallback, int min, int max) =>
+        int.TryParse(configuration[key], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, min, max)
+            : fallback;
+
+    private static double ReadBoundedDouble(IConfiguration configuration, string key, double fallback, double min, double max) =>
+        double.TryParse(configuration[key], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, min, max)
+            : fallback;
 
     private static string ExtractJson(string content)
     {
@@ -353,13 +532,16 @@ public class LlmService
 
         if (lower.Contains("отмен", StringComparison.Ordinal))
         {
-            intent.Metric ??= "orders_count";
-            intent.Filters.Add(new IntentFilter
+            if (!string.Equals(intent.Metric, "cancellation_rate", StringComparison.OrdinalIgnoreCase))
             {
-                Field = "status_order",
-                Operator = "=",
-                Value = "cancelled"
-            });
+                intent.Metric ??= "orders_count";
+                intent.Filters.Add(new IntentFilter
+                {
+                    Field = "status_order",
+                    Operator = "=",
+                    Value = "cancelled"
+                });
+            }
         }
         else if (lower.Contains("заверш", StringComparison.Ordinal) || lower.Contains("completed", StringComparison.Ordinal) || lower.Contains("done", StringComparison.Ordinal))
         {
@@ -484,22 +666,19 @@ public class LlmService
     {
         periods = null;
 
-        if ((text.Contains("этот год", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий год", StringComparison.OrdinalIgnoreCase)) &&
-            text.Contains("прошлый год", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousYear(text))
         {
             periods = new List<string> { "current_year", "previous_year" };
             return true;
         }
 
-        if ((text.Contains("этот месяц", StringComparison.OrdinalIgnoreCase) || text.Contains("текущий месяц", StringComparison.OrdinalIgnoreCase)) &&
-            text.Contains("прошлый месяц", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousMonth(text))
         {
             periods = new List<string> { "current_month", "previous_month" };
             return true;
         }
 
-        if ((text.Contains("эта неделя", StringComparison.OrdinalIgnoreCase) || text.Contains("текущая неделя", StringComparison.OrdinalIgnoreCase)) &&
-            text.Contains("прошлая неделя", StringComparison.OrdinalIgnoreCase))
+        if (PeriodTextPatterns.MentionsCurrentAndPreviousWeek(text))
         {
             periods = new List<string> { "current_week", "previous_week" };
             return true;
@@ -668,6 +847,9 @@ public static class PromptTemplates
 {
     public static string SystemPrompt(SemanticLayer semanticLayer)
     {
+        if (!bool.TryParse(Environment.GetEnvironmentVariable("DRIVEE_USE_LEGACY_PROMPT"), out var useLegacyPrompt) || !useLegacyPrompt)
+            return CompactPromptTemplates.SystemPrompt(semanticLayer);
+
         var metrics = string.Join(Environment.NewLine, semanticLayer.Metrics.Select(metric =>
             $"- {metric.Key}: {metric.DisplayLabel}; aggregation={metric.Aggregation}; source={metric.Source}; date_column={metric.DateColumn}; synonyms=[{string.Join(", ", metric.Synonyms.Take(8))}]"));
         var dimensions = string.Join(Environment.NewLine, semanticLayer.Dimensions.Select(dimension =>

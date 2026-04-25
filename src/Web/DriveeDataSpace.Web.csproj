@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,6 +8,7 @@
     <AssemblyName>DriveeDataSpace.Web</AssemblyName>
     <RootNamespace>DriveeDataSpace.Web</RootNamespace>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin-*/**;obj-*/**;.codex-build/**</DefaultItemExcludes>
+    <UserSecretsId>871e2f84-fed8-4e04-a8d6-b86684e12315</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
