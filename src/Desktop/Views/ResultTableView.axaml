@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="NexusDataSpace.Desktop.Views.ResultTableView">
-    <Border BorderBrush="#e5e7eb" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+    <Border BorderBrush="#14FFFFFF" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
         <ScrollViewer HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
                       MaxHeight="320">
@@ -11,7 +11,7 @@
                       IsReadOnly="True"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      Background="White"
+                      Background="#111A2E"
                       BorderThickness="0"
                       FontSize="13"/>
         </ScrollViewer>

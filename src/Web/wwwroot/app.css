@@ -1745,3 +1745,918 @@ h1:focus {
         justify-content: flex-start;
     }
 }
+
+/* ================= Nexus Neon Interface Refresh ================= */
+:root {
+    --bg-main: #0B1220;
+    --bg-secondary: #0F172A;
+    --bg-card: #111A2E;
+    --bg-sidebar: #0E1628;
+    --gradient-primary: linear-gradient(135deg, #00D1FF 0%, #3B82F6 100%);
+    --gradient-neon: linear-gradient(135deg, #6366F1 0%, #22D3EE 100%);
+    --glow-blue: rgba(59, 130, 246, 0.5);
+    --glow-cyan: rgba(0, 209, 255, 0.6);
+    --border-glow: rgba(59, 130, 246, 0.3);
+    --text-primary: #E2E8F0;
+    --text-secondary: #94A3B8;
+    --text-title: #F8FAFC;
+    --text-accent: #38BDF8;
+    --btn-primary-bg: linear-gradient(135deg, #3B82F6, #00D1FF);
+    --btn-primary-hover: linear-gradient(135deg, #2563EB, #06B6D4);
+    --btn-secondary-bg: #1E293B;
+    --btn-secondary-hover: #2A3A55;
+    --btn-ghost-bg: rgba(255, 255, 255, 0.03);
+    --btn-ghost-border: rgba(255, 255, 255, 0.08);
+    --chart-primary: #3B82F6;
+    --chart-secondary: #22D3EE;
+    --chart-accent: #6366F1;
+    --chart-grid: rgba(255, 255, 255, 0.05);
+    --chat-user-bg: linear-gradient(135deg, #3B82F6, #6366F1);
+    --chat-ai-bg: #111A2E;
+    --chat-ai-border: rgba(255, 255, 255, 0.05);
+    --sql-bg: #020617;
+    --sql-text: #38BDF8;
+    --input-bg: #0F172A;
+    --input-border: rgba(255, 255, 255, 0.08);
+    --input-focus: #3B82F6;
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --error: #EF4444;
+    --info: #38BDF8;
+    --divider: rgba(255, 255, 255, 0.06);
+}
+
+html,
+body {
+    background: var(--bg-main);
+    color: var(--text-primary);
+    font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 72% 8%, rgba(99, 102, 241, 0.18), transparent 26%),
+        radial-gradient(circle at 38% 40%, rgba(0, 209, 255, 0.10), transparent 28%),
+        linear-gradient(180deg, rgba(2, 6, 23, 0), rgba(2, 6, 23, 0.22));
+    z-index: -1;
+}
+
+a,
+.btn-link,
+.auth-link {
+    color: var(--text-accent);
+}
+
+.bi-workspace {
+    background:
+        radial-gradient(circle at 86% 18%, rgba(59, 130, 246, 0.12), transparent 24%),
+        radial-gradient(circle at 42% 46%, rgba(34, 211, 238, 0.06), transparent 26%),
+        var(--bg-main);
+    color: var(--text-primary);
+}
+
+.bi-sidebar {
+    background:
+        linear-gradient(180deg, rgba(14, 22, 40, 0.98), rgba(8, 14, 27, 0.98)),
+        var(--bg-sidebar);
+    border-right: 1px solid var(--divider);
+    box-shadow: 18px 0 50px rgba(0, 0, 0, 0.22);
+}
+
+.bi-brand {
+    border-bottom-color: var(--divider);
+    padding: 14px 2px 18px;
+}
+
+.bi-logo,
+.bi-avatar,
+.bi-welcome-icon {
+    position: relative;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, rgba(0, 209, 255, 0.25), rgba(99, 102, 241, 0.22)),
+        rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(0, 209, 255, 0.45);
+    box-shadow: 0 0 24px rgba(0, 209, 255, 0.24), inset 0 0 18px rgba(99, 102, 241, 0.20);
+    color: transparent !important;
+    font-size: 0 !important;
+}
+
+.bi-logo::before,
+.bi-avatar::before,
+.bi-welcome-icon::before {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    border-radius: inherit;
+    background: url("/assets/icons/logo-NEXUS-icon.png") center / contain no-repeat;
+}
+
+.bi-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+}
+
+.bi-welcome-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+}
+
+.bi-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+}
+
+.bi-brand-title,
+.auth-title {
+    color: var(--text-title);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.bi-brand-sub,
+.auth-subtitle,
+.bi-tagline,
+.bi-muted,
+.bi-user-meta,
+.bi-chat-hint,
+.bi-meta-info,
+.chart-toolbar .chart-hint,
+.admin-user-sub,
+.ops-sub,
+.analytics-checks-sub,
+.llm-key-hint {
+    color: var(--text-secondary) !important;
+}
+
+.bi-user-card,
+.bi-card,
+.bi-empty,
+.auth-card,
+.auth-access-card,
+.ops-card,
+.llm-fact,
+.analytics-check-item,
+.reports-card,
+.bi-page-body .bi-card {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid var(--btn-ghost-border) !important;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+}
+
+.bi-user-card {
+    border-color: rgba(59, 130, 246, 0.22) !important;
+    border-radius: 12px;
+}
+
+.bi-user-label,
+.bi-section-title,
+.bi-nav-group-title,
+.ops-label,
+.llm-fact-label,
+.bi-trail-title,
+.bi-correction-title {
+    color: var(--text-secondary) !important;
+}
+
+.bi-user-name,
+.bi-chat-header h1,
+.bi-card-title,
+.bi-page h1,
+.admin-section-head h2,
+.analytics-checks-title,
+.security-check-title,
+.ops-value,
+.llm-fact-value,
+.admin-user-name,
+.bi-result-explain,
+.bi-chat-welcome h2,
+.auth-card h1,
+.auth-access-card h1 {
+    color: var(--text-title) !important;
+}
+
+.bi-nav-link,
+.bi-template,
+.bi-report-link,
+.bi-section-toggle,
+.bi-logout-btn,
+.chart-toolbar .chart-reset,
+.bi-details-btn,
+.bi-btn.ghost,
+.bi-insight-tab,
+.bi-viz-switch button {
+    background: var(--btn-ghost-bg);
+    border: 1px solid var(--btn-ghost-border);
+    color: var(--text-primary);
+    backdrop-filter: blur(10px);
+}
+
+.bi-nav-link:hover,
+.bi-template:hover,
+.bi-report-link:hover,
+.bi-section-toggle:hover,
+.bi-logout-btn:hover,
+.chart-toolbar .chart-reset:hover,
+.bi-details-btn:hover,
+.bi-btn.ghost:hover:not(:disabled),
+.bi-insight-tab:hover,
+.bi-viz-switch button:hover {
+    background: var(--btn-secondary-hover);
+    border-color: var(--border-glow);
+    color: var(--text-title);
+}
+
+.bi-nav-link.active {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.32), rgba(99, 102, 241, 0.22));
+    color: #fff;
+    border-color: rgba(59, 130, 246, 0.58);
+    box-shadow: 0 0 24px rgba(59, 130, 246, 0.25), inset 3px 0 0 #00D1FF;
+}
+
+.bi-nav-ico,
+.bi-nav-link.active .bi-nav-ico,
+.bi-details summary,
+.bi-inline-details summary,
+.bi-trail-title,
+.bi-correction-title,
+.audit-table code {
+    color: var(--text-accent) !important;
+}
+
+.bi-new-chat,
+.bi-run,
+.bi-send,
+.bi-btn,
+.auth-submit,
+.bi-save-btn,
+.bi-viz-switch button.active,
+.bi-insight-tab.active {
+    background: var(--btn-primary-bg) !important;
+    border: 1px solid rgba(0, 209, 255, 0.22) !important;
+    color: #fff !important;
+    box-shadow: 0 0 24px rgba(59, 130, 246, 0.28), 0 10px 28px rgba(0, 0, 0, 0.20);
+}
+
+.bi-new-chat:hover,
+.bi-run:hover:not(:disabled),
+.bi-send:hover:not(:disabled),
+.bi-btn:hover:not(:disabled),
+.auth-submit:hover,
+.bi-save-btn:hover {
+    background: var(--btn-primary-hover) !important;
+    box-shadow: 0 0 32px var(--glow-cyan), 0 12px 30px rgba(0, 0, 0, 0.26);
+}
+
+.bi-chat-main,
+.bi-page-main,
+.bi-page-body,
+.bi-reports-body,
+.admin-grid,
+.auth-access-denied {
+    background: transparent !important;
+}
+
+.bi-chat-header {
+    background: rgba(11, 18, 32, 0.84) !important;
+    border-bottom: 1px solid var(--divider);
+    backdrop-filter: blur(10px);
+}
+
+.bi-chat-log {
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.12), transparent 40%),
+        transparent !important;
+}
+
+.bi-chat-welcome {
+    max-width: 1140px;
+    margin: 18px auto 8px;
+    padding: 28px 32px;
+    border: 1px solid rgba(0, 209, 255, 0.45);
+    border-radius: 18px;
+    background:
+        radial-gradient(ellipse at 20% 50%, rgba(0, 209, 255, 0.10), transparent 38%),
+        radial-gradient(ellipse at 84% 30%, rgba(99, 102, 241, 0.13), transparent 34%),
+        rgba(255, 255, 255, 0.02);
+    box-shadow: 0 0 28px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+}
+
+.bi-chat-welcome h2 {
+    font-size: clamp(24px, 3vw, 34px);
+}
+
+.bi-chat-welcome p {
+    color: var(--text-secondary);
+    font-size: 15px;
+}
+
+.bi-welcome-ex,
+.auth-input,
+.auth-textarea,
+.bi-input,
+.bi-save-name,
+.admin-reject-reason,
+.bi-correction-field select,
+.audit-filters .auth-input,
+.llm-provider-field .auth-input,
+.company-name-field .auth-input {
+    background: var(--input-bg) !important;
+    border: 1px solid var(--input-border) !important;
+    color: var(--text-primary) !important;
+}
+
+.bi-welcome-ex {
+    min-height: 58px;
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.bi-welcome-ex:hover {
+    background: rgba(59, 130, 246, 0.18) !important;
+    border-color: rgba(0, 209, 255, 0.5) !important;
+    color: var(--text-title) !important;
+}
+
+.auth-input:focus,
+.auth-textarea:focus,
+.bi-input:focus,
+.bi-save-name:focus,
+.admin-reject-reason:focus,
+.bi-correction-field select:focus {
+    outline: none;
+    border-color: var(--input-focus) !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.20), 0 0 24px rgba(0, 209, 255, 0.14) !important;
+}
+
+.bi-chat-input-area {
+    background: rgba(11, 18, 32, 0.90) !important;
+    border-top: 1px solid var(--divider);
+    backdrop-filter: blur(10px);
+}
+
+.bi-chat-input-wrap {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(0, 209, 255, 0.45) !important;
+    border-radius: 20px;
+    box-shadow: 0 0 28px rgba(59, 130, 246, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.bi-chat-input-wrap:focus-within {
+    border-color: rgba(0, 209, 255, 0.78) !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.20), 0 0 34px rgba(0, 209, 255, 0.24);
+}
+
+.bi-chat-input {
+    color: var(--text-primary);
+}
+
+.bi-chat-input::placeholder,
+.auth-input::placeholder,
+.bi-save-name::placeholder {
+    color: rgba(148, 163, 184, 0.72);
+}
+
+.bi-bubble-user {
+    background: var(--chat-user-bg);
+    color: var(--chat-user-text, #fff);
+    box-shadow: 0 12px 28px rgba(59, 130, 246, 0.24);
+}
+
+.bi-bubble-bot,
+.bi-bubble-result,
+.bi-result-card,
+.bi-save-row,
+.bi-insight-panel,
+.bi-trail,
+.bi-correction-panel,
+.bi-inline-details,
+.datasource-selected {
+    background: var(--chat-ai-bg) !important;
+    border-color: var(--chat-ai-border) !important;
+    color: var(--text-primary) !important;
+}
+
+.bi-bubble-bot,
+.bi-bubble-result {
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.22);
+}
+
+.bi-bubble-bot p,
+.bi-explain,
+.bi-trail-head,
+.bi-trail-detail,
+.bi-tech,
+.auth-copy,
+.auth-access-card p,
+.admin-facts,
+.admin-email-body,
+.security-check-details,
+.analytics-check-meta,
+.audit-details,
+.llm-fact-sub {
+    color: var(--text-primary) !important;
+}
+
+.bi-result-card,
+.bi-save-row,
+.bi-result-card:last-child {
+    border-color: var(--divider) !important;
+}
+
+.bi-sql,
+.bi-json,
+.bi-bubble-result .bi-sql {
+    background: var(--sql-bg) !important;
+    color: var(--sql-text) !important;
+    border: 1px solid rgba(56, 189, 248, 0.16);
+    box-shadow: inset 0 0 28px rgba(59, 130, 246, 0.08);
+}
+
+.chart-wrap {
+    background: rgba(2, 6, 23, 0.42);
+    border: 1px solid var(--divider);
+    border-radius: 12px;
+    padding: 8px;
+}
+
+.bi-table {
+    color: var(--text-primary);
+}
+
+.bi-table th,
+.bi-table td {
+    border-bottom-color: var(--divider);
+}
+
+.bi-table th {
+    background: rgba(30, 41, 59, 0.72) !important;
+    color: var(--text-secondary);
+}
+
+.bi-table tr:hover td {
+    background: rgba(59, 130, 246, 0.08) !important;
+}
+
+.auth-shell {
+    background:
+        radial-gradient(circle at 20% 18%, rgba(0, 209, 255, 0.16), transparent 28%),
+        radial-gradient(circle at 76% 76%, rgba(99, 102, 241, 0.16), transparent 30%),
+        var(--bg-main);
+}
+
+.auth-card {
+    border-radius: 18px;
+}
+
+.auth-label,
+.admin-section-head,
+.company-name-field,
+.admin-profile-actions label,
+.llm-provider-field,
+.bi-correction-field {
+    color: var(--text-primary) !important;
+}
+
+.auth-footnote {
+    color: var(--text-secondary);
+}
+
+.auth-error,
+.admin-error,
+.analytics-checks-status.bad,
+.security-check.attention {
+    background: rgba(239, 68, 68, 0.10) !important;
+    border-color: rgba(239, 68, 68, 0.32) !important;
+    color: #FCA5A5 !important;
+}
+
+.auth-success,
+.admin-notice,
+.analytics-checks-status.ok,
+.analytics-check-item.ok {
+    background: rgba(34, 197, 94, 0.10) !important;
+    border-color: rgba(34, 197, 94, 0.32) !important;
+    color: #86EFAC !important;
+}
+
+.bi-confidence.high,
+.audit-status.ok {
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.34);
+    color: #86EFAC;
+}
+
+.bi-confidence.mid,
+.bi-bubble-result .bi-warn {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.34);
+    color: #FCD34D;
+}
+
+.bi-confidence.low,
+.audit-status.bad,
+.bi-error {
+    background: rgba(239, 68, 68, 0.12) !important;
+    border-color: rgba(239, 68, 68, 0.34) !important;
+    color: #FCA5A5 !important;
+}
+
+.admin-role.admin,
+.admin-role.owner,
+.admin-role.analyst,
+.admin-role.user,
+.admin-role.viewer,
+.admin-role-select.owner,
+.admin-role-select.admin,
+.admin-role-select.analyst,
+.admin-role-select.viewer,
+.admin-count,
+.analytics-check-badge {
+    background: rgba(59, 130, 246, 0.14) !important;
+    border-color: rgba(59, 130, 246, 0.30) !important;
+    color: var(--text-accent) !important;
+}
+
+.ops-bucket-bars {
+    border-bottom-color: var(--chart-grid);
+}
+
+.ops-bucket-bar.requests {
+    background: linear-gradient(180deg, var(--chart-secondary), var(--chart-primary));
+}
+
+.ops-bucket-bar.errors {
+    background: var(--error);
+}
+
+.ops-bucket-bar.limited {
+    background: var(--warning);
+}
+
+.blazor-error-boundary {
+    background-color: rgba(239, 68, 68, 0.18);
+}
+
+@media (max-width: 960px) {
+    .bi-workspace {
+        min-height: 100vh;
+    }
+
+    .bi-sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--divider);
+    }
+
+    .bi-chat-welcome {
+        margin: 10px 14px;
+        padding: 22px 16px;
+    }
+
+    .bi-msg {
+        padding: 0 14px;
+    }
+
+    .bi-bubble {
+        max-width: 92%;
+    }
+}
+
+/* Admin dark-theme completion and layout fixes */
+.bi-reports-body {
+    min-height: 0;
+    background:
+        radial-gradient(circle at 78% 10%, rgba(59, 130, 246, 0.08), transparent 30%),
+        linear-gradient(180deg, rgba(15, 23, 42, 0.70), rgba(11, 18, 32, 0.96)) !important;
+}
+
+.llm-provider-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(360px, 780px) auto;
+    align-items: start;
+    gap: 16px 18px;
+}
+
+.llm-provider-row > .bi-btn {
+    align-self: start;
+    margin-top: 42px;
+    margin-right: 0;
+    min-width: 150px;
+}
+
+.llm-provider-field,
+.llm-key-field,
+.company-name-field,
+.datasource-form label {
+    width: 100%;
+    color: var(--text-primary) !important;
+    min-width: 0;
+}
+
+.llm-key-field {
+    max-width: 780px;
+}
+
+.company-admin-main {
+    display: grid;
+    grid-template-columns: minmax(280px, 520px) auto;
+    align-items: end;
+    gap: 14px 16px;
+}
+
+.company-admin-main .bi-btn {
+    align-self: end;
+    margin: 0;
+    min-width: 150px;
+}
+
+.datasource-wizard-step,
+.datasource-status-panel,
+.datasource-readonly-note,
+.security-check,
+.security-check.ok,
+.security-check.attention,
+.analytics-check-item,
+.analytics-check-item.ok,
+.analytics-check-item.bad {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-color: var(--btn-ghost-border) !important;
+    color: var(--text-primary) !important;
+}
+
+.datasource-wizard-step.done,
+.security-check.ok,
+.analytics-check-item.ok {
+    background: rgba(34, 197, 94, 0.09) !important;
+    border-color: rgba(34, 197, 94, 0.35) !important;
+}
+
+.datasource-wizard-step.current {
+    background: rgba(99, 102, 241, 0.14) !important;
+    border-color: rgba(99, 102, 241, 0.48) !important;
+}
+
+.security-check.attention,
+.analytics-check-item.bad {
+    background: rgba(239, 68, 68, 0.10) !important;
+    border-color: rgba(239, 68, 68, 0.36) !important;
+}
+
+.datasource-readonly-note {
+    border-color: rgba(59, 130, 246, 0.42) !important;
+    color: var(--text-primary) !important;
+}
+
+.datasource-wizard-step strong,
+.security-check-title,
+.analytics-check-query {
+    color: var(--text-title) !important;
+}
+
+.datasource-wizard-step small,
+.security-check-details,
+.analytics-check-meta,
+.datasource-form label,
+.datasource-status-panel .llm-fact-label {
+    color: var(--text-secondary) !important;
+}
+
+.datasource-wizard-step span {
+    background: rgba(148, 163, 184, 0.16) !important;
+    color: var(--text-primary) !important;
+}
+
+.datasource-wizard-step.done span {
+    background: var(--success) !important;
+    color: #fff !important;
+}
+
+.datasource-wizard-step.current span {
+    background: var(--chart-accent) !important;
+    color: #fff !important;
+}
+
+.datasource-status.active,
+.datasource-status.verified,
+.datasource-status.active-not-verified,
+.datasource-status.draft,
+.datasource-status.error {
+    background: rgba(59, 130, 246, 0.13) !important;
+    border-color: rgba(59, 130, 246, 0.30) !important;
+    color: var(--text-accent) !important;
+}
+
+.datasource-status.active,
+.datasource-status.verified {
+    background: rgba(34, 197, 94, 0.13) !important;
+    border-color: rgba(34, 197, 94, 0.34) !important;
+    color: #86EFAC !important;
+}
+
+.datasource-status.error,
+.datasource-error-text,
+.analytics-check-errors {
+    color: #FCA5A5 !important;
+}
+
+.llm-secret-ok {
+    color: #22C55E !important;
+}
+
+.llm-secret-missing {
+    color: #FCA5A5 !important;
+}
+
+.audit-checkbox {
+    color: var(--text-primary) !important;
+}
+
+@media (max-width: 1180px) {
+    .llm-provider-row {
+        grid-template-columns: 1fr;
+    }
+
+    .llm-provider-row > .bi-btn {
+        margin-top: 0;
+        justify-self: start;
+    }
+}
+
+@media (max-width: 760px) {
+    .company-admin-main {
+        grid-template-columns: 1fr;
+    }
+
+    .company-admin-main .bi-btn {
+        justify-self: start;
+    }
+}
+
+/* Final polish: logo image as the tile, compact admin actions */
+.bi-logo,
+.bi-avatar,
+.bi-welcome-icon {
+    background: transparent url("/assets/icons/logo-NEXUS-icon.png") center / 118% auto no-repeat !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+.bi-logo::before,
+.bi-avatar::before,
+.bi-welcome-icon::before {
+    display: none !important;
+}
+
+.bi-logo {
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 15px !important;
+}
+
+.bi-welcome-icon {
+    width: 108px !important;
+    height: 108px !important;
+    border-radius: 26px !important;
+}
+
+.bi-avatar {
+    width: 42px !important;
+    height: 42px !important;
+}
+
+.bi-brand {
+    gap: 14px;
+}
+
+.auth-input,
+.auth-textarea,
+.admin-reject-reason,
+.bi-save-name,
+.bi-input {
+    box-sizing: border-box;
+}
+
+.company-admin-main {
+    display: grid !important;
+    grid-template-columns: minmax(280px, 520px) 180px;
+    align-items: end;
+    justify-content: start;
+    gap: 14px;
+}
+
+.company-admin-main .bi-btn {
+    width: 180px !important;
+    min-width: 0 !important;
+    justify-self: start;
+}
+
+.llm-provider-row {
+    display: grid !important;
+    grid-template-columns: minmax(220px, 280px) minmax(360px, 1fr) 180px;
+    align-items: end;
+    gap: 16px 18px;
+}
+
+.llm-provider-row > .bi-btn {
+    width: 180px !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    align-self: end;
+    justify-self: start;
+}
+
+.llm-key-field {
+    max-width: none;
+}
+
+.audit-table code {
+    background: rgba(56, 189, 248, 0.10) !important;
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    color: var(--text-accent) !important;
+    border-radius: 7px;
+    padding: 3px 7px;
+}
+
+.admin-actions-cell {
+    min-width: 280px;
+}
+
+.admin-request-actions .bi-btn {
+    min-width: 108px;
+    margin-right: 0;
+}
+
+@media (max-width: 1180px) {
+    .llm-provider-row {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 760px) {
+    .company-admin-main {
+        grid-template-columns: 1fr !important;
+    }
+
+    .company-admin-main .bi-btn,
+    .llm-provider-row > .bi-btn {
+        width: 180px !important;
+    }
+}
+
+/* Logo mark variant: use the extracted transparent symbol inside the neon tile. */
+.bi-logo,
+.bi-avatar,
+.bi-welcome-icon {
+    position: relative !important;
+    overflow: hidden !important;
+    background:
+        linear-gradient(135deg, rgba(0, 209, 255, 0.08), rgba(99, 102, 241, 0.10)),
+        #0A1324 !important;
+    border: 1px solid rgba(0, 209, 255, 0.48) !important;
+    box-shadow: 0 0 22px rgba(0, 209, 255, 0.16), inset 0 0 18px rgba(2, 6, 23, 0.42) !important;
+}
+
+.bi-logo::before,
+.bi-avatar::before,
+.bi-welcome-icon::before {
+    content: "" !important;
+    display: block !important;
+    position: absolute;
+    inset: 7px;
+    background: url("/assets/icons/logo-NEXUS-mark.png") center / contain no-repeat;
+}
+
+.bi-logo {
+    width: 48px !important;
+    height: 48px !important;
+    border-radius: 14px !important;
+}
+
+.bi-welcome-icon {
+    width: 86px !important;
+    height: 86px !important;
+    border-radius: 22px !important;
+}
+
+.bi-welcome-icon::before {
+    inset: 13px;
+}
+
+.bi-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 10px !important;
+}
+
+.bi-avatar::before {
+    inset: 6px;
+}

@@ -16,7 +16,7 @@
 
         <!-- USER bubble (справа) -->
         <Border HorizontalAlignment="Right"
-                Background="#4f46e5"
+                Background="#3B82F6"
                 CornerRadius="14,14,4,14"
                 Padding="14,10"
                 MaxWidth="680"
@@ -32,20 +32,15 @@
                     Spacing="10"
                     IsVisible="{Binding Role, Converter={x:Static views1:Converters.IsBotRoleConverter}}">
             <!-- Avatar -->
-            <Border Background="#4f46e5"
-                    CornerRadius="8"
-                    Width="32" Height="32"
-                    VerticalAlignment="Top">
-                <TextBlock Text="◆"
-                           Foreground="White"
-                           FontSize="13"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+            <Border Classes="avatar">
+                <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                       Stretch="Uniform"
+                       Margin="7"/>
             </Border>
             <Border Classes="bot-bubble"
                     MaxWidth="640">
                 <TextBlock Text="{Binding Text}"
-                           Foreground="#1f2937"
+                           Foreground="#E2E8F0"
                            FontSize="14"
                            TextWrapping="Wrap"/>
             </Border>
@@ -56,15 +51,10 @@
                     Spacing="10"
                     IsVisible="{Binding Role, Converter={x:Static views1:Converters.IsResultRoleConverter}}">
             <!-- Avatar -->
-            <Border Background="#4f46e5"
-                    CornerRadius="8"
-                    Width="32" Height="32"
-                    VerticalAlignment="Top">
-                <TextBlock Text="◆"
-                           Foreground="White"
-                           FontSize="13"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+            <Border Classes="avatar">
+                <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                       Stretch="Uniform"
+                       Margin="7"/>
             </Border>
 
             <!-- Result card -->
@@ -74,14 +64,14 @@
                 <StackPanel>
 
                     <!-- ── Error ─────────────────────────────────── -->
-                    <Border Background="#fef2f2"
-                            BorderBrush="#fecaca"
+                    <Border Background="#2A1119"
+                            BorderBrush="#7F1D1D"
                             BorderThickness="1"
                             CornerRadius="4,14,0,0"
                             Padding="14,12"
                             IsVisible="{Binding Result.Error, Converter={x:Static views1:Converters.IsNotNullConverter}}">
                         <TextBlock Text="{Binding Result.Error}"
-                                   Foreground="#991b1b"
+                                   Foreground="#FCA5A5"
                                    FontSize="13"
                                    TextWrapping="Wrap"/>
                     </Border>
@@ -92,19 +82,21 @@
                         <TextBlock Text="{Binding Result.Explain}"
                                    FontSize="14"
                                    FontWeight="Medium"
-                                   Foreground="#1f2937"
+                                   Foreground="#E2E8F0"
                                    TextWrapping="Wrap"/>
 
                         <!-- Warnings -->
                         <ItemsControl ItemsSource="{Binding Result.Warnings}" Margin="0,6,0,0">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Background="#fffbeb"
+                                    <Border Background="#251A08"
+                                            BorderBrush="#66591E0B"
+                                            BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="8,5"
                                             Margin="0,2">
                                         <TextBlock Text="{Binding}"
-                                                   Foreground="#92400e"
+                                                   Foreground="#FCD34D"
                                                    FontSize="12.5"
                                                    TextWrapping="Wrap"/>
                                     </Border>
@@ -125,7 +117,7 @@
                                            Foreground="{Binding Result.Confidence, Converter={x:Static views1:Converters.ConfidenceFgConverter}}"/>
                             </Border>
                             <TextBlock FontSize="12"
-                                       Foreground="#64748b"
+                                       Foreground="#94A3B8"
                                        VerticalAlignment="Center"
                                        Text="{Binding Result.Result, Converter={x:Static views1:Converters.RowStatsConverter}}"/>
                         </StackPanel>
@@ -143,8 +135,8 @@
                         </StackPanel>
 
                         <!-- Reasoning Trail -->
-                        <Border Background="#f8f9ff"
-                                BorderBrush="#e0e7ff"
+                        <Border Background="#0F172A"
+                                BorderBrush="#143B82F6"
                                 BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="12,12,12,14"
@@ -155,7 +147,7 @@
                                 <TextBlock Text="КАК Я ПОНЯЛ ЗАПРОС"
                                            FontSize="11"
                                            FontWeight="SemiBold"
-                                           Foreground="#4338ca"
+                                           Foreground="#2563EB"
                                            LetterSpacing="1"
                                            Margin="0,0,0,10"/>
                                 <ItemsControl ItemsSource="{Binding Result.ReasoningTrail}">
@@ -166,10 +158,10 @@
                                                 <TextBlock Text="{Binding Title}"
                                                            FontSize="13.5"
                                                            FontWeight="SemiBold"
-                                                           Foreground="#1f2937"/>
+                                                           Foreground="#E2E8F0"/>
                                                 <TextBlock Text="{Binding Detail}"
                                                            FontSize="13"
-                                                           Foreground="#334155"
+                                                           Foreground="#E2E8F0"
                                                            TextWrapping="Wrap"
                                                            Margin="0,3,0,0"/>
                                             </StackPanel>
@@ -180,8 +172,8 @@
                         </Border>
 
                         <!-- SQL Panel -->
-                        <Border Background="#f8f9ff"
-                                BorderBrush="#e0e7ff"
+                        <Border Background="#0F172A"
+                                BorderBrush="#143B82F6"
                                 BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="12,12,12,14"
@@ -192,10 +184,12 @@
                                 <TextBlock Text="SQL ЗАПРОС"
                                            FontSize="11"
                                            FontWeight="SemiBold"
-                                           Foreground="#4338ca"
+                                           Foreground="#2563EB"
                                            LetterSpacing="1"
                                            Margin="0,0,0,10"/>
-                                <Border Background="#0f172a"
+                                <Border Background="#020617"
+                                        BorderBrush="#2638BDF8"
+                                        BorderThickness="1"
                                         CornerRadius="6"
                                         Padding="12">
                                     <TextBlock Text="{Binding Result.Sql}"
@@ -208,7 +202,7 @@
                                 <Button Content="Технические детали ▼"
                                         Background="Transparent"
                                         BorderThickness="0"
-                                        Foreground="#4f46e5"
+                                        Foreground="#3B82F6"
                                         FontSize="12"
                                         Padding="0,8,0,0"
                                         Cursor="Hand"
@@ -217,7 +211,7 @@
                                     <TextBlock Text="{Binding Result.TechnicalExplain}"
                                                FontFamily="Consolas,monospace"
                                                FontSize="11.5"
-                                               Foreground="#475569"
+                                               Foreground="#94A3B8"
                                                TextWrapping="Wrap"/>
                                 </Border>
                             </StackPanel>
@@ -258,7 +252,7 @@
                             <TextBox Grid.Column="0"
                                      x:Name="ReportNameBox"
                                      Classes="report-name-input"
-                                     PlaceholderText="Название отчёта"
+                                     Watermark="Название отчёта"
                                      Text="{Binding ReportName}"
                                      IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
                                      Margin="0,0,10,0"/>
@@ -268,7 +262,7 @@
                                     IsVisible="{Binding SavedAs, Converter={x:Static views1:Converters.IsNullConverter}}"
                                     Click="SaveReport_Click"/>
                             <TextBlock Grid.Column="2"
-                                       Foreground="#047857"
+                                       Foreground="#22C55E"
                                        FontSize="12.5"
                                        VerticalAlignment="Center"
                                        Text="{Binding SavedAs, StringFormat='Сохранено как {0}'}"
