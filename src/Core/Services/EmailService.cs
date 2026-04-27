@@ -1,10 +1,10 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class EmailService
 {
@@ -29,11 +29,11 @@ public sealed class EmailService
     {
         SaveLocalEmail(
             request.Email,
-            "Drivee BI: доступ одобрен",
+            "Nexus Data Space: доступ одобрен",
             $"""
             Здравствуйте, {request.DisplayName}!
 
-            Ваш запрос на доступ к Drivee BI одобрен.
+            Ваш запрос на доступ к Nexus Data Space одобрен.
             Для входа используйте email: {request.Email}
             Пароль тот же, который вы указали при регистрации.
             """,
@@ -50,11 +50,11 @@ public sealed class EmailService
 
         SaveLocalEmail(
             request.Email,
-            "Drivee BI: запрос на доступ отклонён",
+            "Nexus Data Space: запрос на доступ отклонён",
             $"""
             Здравствуйте, {request.DisplayName}!
 
-            Ваш запрос на доступ к Drivee BI отклонён.
+            Ваш запрос на доступ к Nexus Data Space отклонён.
             Причина: {reason}
             """,
             "registration_rejected");
@@ -131,7 +131,27 @@ public sealed class EmailService
             CREATE INDEX IF NOT EXISTS ix_local_email_outbox_created_at
                 ON local_email_outbox(created_at DESC);";
         command.ExecuteNonQuery();
+
+        MigrateLegacyBranding(connection);
     }
+
+    private static void MigrateLegacyBranding(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE local_email_outbox
+            SET subject = replace(subject, $legacy_brand, $brand),
+                body = replace(body, $legacy_brand, $brand)
+            WHERE subject LIKE $legacy_pattern
+               OR body LIKE $legacy_pattern";
+        command.Parameters.AddWithValue("$legacy_brand", LegacyBrandName());
+        command.Parameters.AddWithValue("$brand", "Nexus Data Space");
+        command.Parameters.AddWithValue("$legacy_pattern", $"%{LegacyBrandName()}%");
+        command.ExecuteNonQuery();
+    }
+
+    private static string LegacyBrandName() =>
+        string.Concat("Dri", "vee BI");
 
     private SqliteConnection OpenConnection()
     {

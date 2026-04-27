@@ -1,6 +1,6 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 
-namespace DriveeDataSpace.DriveeDataSpace.Desktop.Models;
+namespace NexusDataSpace.Desktop.Models;
 
 public enum ChatRole { User, Bot, Result }
 

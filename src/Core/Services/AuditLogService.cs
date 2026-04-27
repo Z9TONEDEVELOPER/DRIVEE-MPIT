@@ -1,10 +1,10 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using System.Text;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed record AuditLogEntry(
     long Id,

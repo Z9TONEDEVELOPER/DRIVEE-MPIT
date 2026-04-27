@@ -1,8 +1,8 @@
 using System.Security.Claims;
-using DriveeDataSpace.Web.Components;
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.Core.Services;
-using DriveeDataSpace.Web.Services;
+using NexusDataSpace.Web.Components;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Core.Services;
+using NexusDataSpace.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
@@ -18,7 +18,7 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? "drivee.bi.auth";
+        options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? "nexus.data.space.auth";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Strict;
         options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;

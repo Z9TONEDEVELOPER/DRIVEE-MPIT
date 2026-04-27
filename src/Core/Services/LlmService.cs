@@ -5,11 +5,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public class LlmService
 {
@@ -911,7 +911,7 @@ public class LlmService
     {
         if (lowerText.Contains("кто ты", StringComparison.OrdinalIgnoreCase) || lowerText.Contains("что ты умеешь", StringComparison.OrdinalIgnoreCase))
         {
-            return "Я BI-ассистент Drivee. Помогаю перевести запрос на естественном языке в структурированный intent, затем система кодом строит безопасный SQL, выполняет его и показывает таблицу, график и объяснение.";
+            return "Я BI-ассистент Nexus Data Space. Помогаю перевести запрос на естественном языке в структурированный intent, затем система кодом строит безопасный SQL, выполняет его и показывает таблицу, график и объяснение.";
         }
 
         if (lowerText.Contains("help", StringComparison.OrdinalIgnoreCase) || lowerText.Contains("помощь", StringComparison.OrdinalIgnoreCase))
@@ -927,7 +927,7 @@ public static class PromptTemplates
 {
     public static string SystemPrompt(SemanticLayer semanticLayer)
     {
-        if (!bool.TryParse(Environment.GetEnvironmentVariable("DRIVEE_USE_LEGACY_PROMPT"), out var useLegacyPrompt) || !useLegacyPrompt)
+        if (!bool.TryParse(Environment.GetEnvironmentVariable("NEXUS_DATA_SPACE_USE_LEGACY_PROMPT"), out var useLegacyPrompt) || !useLegacyPrompt)
             return CompactPromptTemplates.SystemPrompt(semanticLayer);
 
         var metrics = string.Join(Environment.NewLine, semanticLayer.Metrics.Select(metric =>
@@ -947,7 +947,7 @@ public static class PromptTemplates
         var sourceKeys = string.Join("\" | \"", semanticLayer.Sources.Select(source => source.Key));
         var dateColumns = string.Join("\" | \"", semanticLayer.Metrics.Select(metric => metric.DateColumn).Distinct(StringComparer.OrdinalIgnoreCase));
         var sortFields = string.Join("\" | \"", new[] { "metric", "period" }.Concat(semanticLayer.Dimensions.Select(dimension => dimension.Key)).Distinct(StringComparer.OrdinalIgnoreCase));
-        return $@"Ты — NL parser для BI-сервиса Drivee. Твоя задача: извлечь смысл пользовательского запроса и вернуть только JSON intent.
+        return $@"Ты — NL parser для BI-сервиса Nexus Data Space. Твоя задача: извлечь смысл пользовательского запроса и вернуть только JSON intent.
 
 ВАЖНО:
 - НИКОГДА не пиши финальный SQL.
@@ -1013,7 +1013,7 @@ Business presets:
 Дополнительные правила:
 - Use only metric/dimension/filter/source keys from the semantic layer above.
 - If the business meaning is covered by Business presets, apply the matching metric, dimensions and filters.
-- Do not transfer Drivee-specific terms to another database unless those terms are explicitly present in semantic layer.
+- Do not transfer Nexus Data Space-specific terms to another database unless those terms are explicitly present in semantic layer.
 - Для временного ряда используй visualization = line.
 - Для top N обычно нужен limit и sort по metric desc.
 - Для compare_periods можно заполнить periods или comparison.periods.

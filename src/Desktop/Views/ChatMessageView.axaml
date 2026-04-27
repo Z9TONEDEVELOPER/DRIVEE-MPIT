@@ -1,10 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:views="using:DriveeDataSpace.DriveeDataSpace.Desktop"
-             xmlns:models="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop.Models"
-             xmlns:coreModels="clr-namespace:DriveeDataSpace.Core.Models;assembly=DriveeDataSpace.Core"
-             xmlns:views1="clr-namespace:DriveeDataSpace.Desktop.Views"
-             x:Class="DriveeDataSpace.Desktop.Views.ChatMessageView"
+             xmlns:views="using:NexusDataSpace.Desktop"
+             xmlns:models="clr-namespace:NexusDataSpace.Desktop.Models"
+             xmlns:coreModels="clr-namespace:NexusDataSpace.Core.Models;assembly=NexusDataSpace.Core"
+             xmlns:views1="clr-namespace:NexusDataSpace.Desktop.Views"
+             x:Class="NexusDataSpace.Desktop.Views.ChatMessageView"
              x:DataType="models:ChatMessage">
 
     <UserControl.Resources>

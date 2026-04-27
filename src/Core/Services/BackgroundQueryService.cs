@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class BackgroundQueryService
 {

@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Core\DriveeDataSpace.Core.csproj" />
+    <ProjectReference Include="..\Core\NexusDataSpace.Core.csproj" />
   </ItemGroup>
 
 </Project>

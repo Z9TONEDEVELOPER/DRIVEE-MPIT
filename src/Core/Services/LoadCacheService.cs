@@ -2,10 +2,10 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class LoadCacheService
 {

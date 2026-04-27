@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed record ValidationResult(
     QueryIntent NormalizedIntent,

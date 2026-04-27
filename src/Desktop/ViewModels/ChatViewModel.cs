@@ -2,11 +2,11 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Services;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Desktop.Models;
+using NexusDataSpace.Desktop.Services;
 
-namespace DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
+namespace NexusDataSpace.Desktop.ViewModels;
 
 public partial class ChatViewModel : ViewModelBase
 {

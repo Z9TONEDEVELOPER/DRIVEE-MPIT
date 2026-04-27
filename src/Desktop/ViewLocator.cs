@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
+using NexusDataSpace.Desktop.ViewModels;
 
-namespace DriveeDataSpace.DriveeDataSpace.Desktop;
+namespace NexusDataSpace.Desktop;
 
 /// <summary>
 /// Given a view model, returns the corresponding view if possible.

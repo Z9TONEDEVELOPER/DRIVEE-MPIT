@@ -4,9 +4,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
-using DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
+using NexusDataSpace.Desktop.ViewModels;
 
-namespace DriveeDataSpace.Desktop.Views;
+namespace NexusDataSpace.Desktop.Views;
 
 public partial class MainWindow : Window
 {

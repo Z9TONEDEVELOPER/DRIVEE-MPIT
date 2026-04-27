@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace DriveeDataSpace.Core.Models;
+namespace NexusDataSpace.Core.Models;
 
 public static class DataSourceProviders
 {

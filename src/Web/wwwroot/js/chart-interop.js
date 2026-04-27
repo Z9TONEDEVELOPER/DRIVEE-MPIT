@@ -1,4 +1,4 @@
-window.driveeCharts = (function () {
+window.nexusDataSpaceCharts = (function () {
     const instances = {};
     let zoomRegistered = false;
 
@@ -163,7 +163,7 @@ window.driveeCharts = (function () {
     return { render, destroy, resetZoom };
 })();
 
-window.driveeChat = {
+window.nexusDataSpaceChat = {
     scrollToBottom(id) {
         const el = document.getElementById(id);
         if (el) {

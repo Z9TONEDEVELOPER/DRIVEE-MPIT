@@ -1,4 +1,4 @@
-namespace DriveeDataSpace.Core.Models;
+namespace NexusDataSpace.Core.Models;
 
 public class QueryResult
 {

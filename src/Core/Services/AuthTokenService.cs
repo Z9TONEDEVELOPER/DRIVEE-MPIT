@@ -1,11 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class AuthTokenService
 {
@@ -15,7 +15,7 @@ public sealed class AuthTokenService
 
     public AuthTokenService(IConfiguration configuration, IHostEnvironment environment)
     {
-        const string devDefaultKey = "drivee-bi-local-dev-token-signing-key-change-me";
+        const string devDefaultKey = "nexus-data-space-local-dev-token-signing-key-change-me";
         var configuredKey = configuration["Auth:ApiTokenSigningKey"];
         if (string.IsNullOrWhiteSpace(configuredKey))
             configuredKey = devDefaultKey;

@@ -1,5 +1,5 @@
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.Core.Services;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Core.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,7 +53,7 @@ app.UseHttpsRedirection();
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "ok",
-    service = "DriveeDataSpace.Api"
+    service = "NexusDataSpace.Api"
 }));
 
 app.MapPost("/api/auth/login", (LoginRequest request, HttpContext context, UserService users, AuthTokenService tokens, LoginRateLimitService loginRateLimit, AuditLogService audit) =>

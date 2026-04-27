@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Components;
 
-namespace DriveeDataSpace.Web.Components;
+namespace NexusDataSpace.Web.Components;
 
 public partial class App : ComponentBase
 {

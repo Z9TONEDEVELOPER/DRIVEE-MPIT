@@ -2,12 +2,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:viewModels="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels"
-        xmlns:views="clr-namespace:DriveeDataSpace.Desktop.Views"
+        xmlns:viewModels="clr-namespace:NexusDataSpace.Desktop.ViewModels"
+        xmlns:views="clr-namespace:NexusDataSpace.Desktop.Views"
         mc:Ignorable="d"
-        x:Class="DriveeDataSpace.Desktop.Views.MainWindow"
+        x:Class="NexusDataSpace.Desktop.Views.MainWindow"
         x:DataType="viewModels:MainWindowViewModel"
-        Title="Drivee BI · NL → SQL аналитика"
+        Title="Nexus Data Space · NL → SQL аналитика"
         Width="1280" Height="800"
         MinWidth="980" MinHeight="640"
         WindowStartupLocation="CenterScreen">
@@ -30,7 +30,7 @@
                                        VerticalAlignment="Center"/>
                         </Border>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="Drivee BI"
+                            <TextBlock Text="Nexus Data Space"
                                        Foreground="White"
                                        FontWeight="Bold"
                                        FontSize="15"/>
@@ -209,7 +209,7 @@
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"/>
                             </Border>
-                            <TextBlock Text="Привет! Я BI-ассистент Drivee"
+                            <TextBlock Text="Привет! Я аналитический ассистент Nexus Data Space"
                                        FontSize="22"
                                        FontWeight="Bold"
                                        HorizontalAlignment="Center"
@@ -599,7 +599,7 @@
                                            VerticalAlignment="Center"/>
                             </Border>
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Drivee BI"
+                                <TextBlock Text="Nexus Data Space"
                                            Foreground="#0f172a"
                                            FontSize="22"
                                            FontWeight="Bold"/>

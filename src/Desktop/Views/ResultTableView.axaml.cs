@@ -1,8 +1,8 @@
 using Avalonia.Controls;
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Desktop.Models;
 
-namespace DriveeDataSpace.Desktop.Views;
+namespace NexusDataSpace.Desktop.Views;
 
 public partial class ResultTableView : UserControl
 {

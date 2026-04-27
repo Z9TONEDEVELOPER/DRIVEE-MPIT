@@ -2,10 +2,10 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @using System.Text.Json
-@using global::DriveeDataSpace.Core.Models
-@using global::DriveeDataSpace.Web.Models
-@using global::DriveeDataSpace.Core.Services
-@using global::DriveeDataSpace.Web.Services
+@using global::NexusDataSpace.Core.Models
+@using global::NexusDataSpace.Web.Models
+@using global::NexusDataSpace.Core.Services
+@using global::NexusDataSpace.Web.Services
 @inject NlSqlEngine Engine
 @inject ReportService Reports
 @inject AuditLogService Audit
@@ -14,14 +14,14 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @implements IDisposable
 
-<PageTitle>Drivee BI · Чат с данными</PageTitle>
+<PageTitle>Nexus Data Space · Чат с данными</PageTitle>
 
 <div class="bi-workspace">
     <aside class="bi-sidebar">
         <div class="bi-brand">
             <div class="bi-logo">◆</div>
             <div>
-                <div class="bi-brand-title">Drivee BI</div>
+                <div class="bi-brand-title">Nexus Data Space</div>
                 <div class="bi-brand-sub">NL → SQL аналитика</div>
             </div>
         </div>
@@ -87,7 +87,7 @@
             {
                 <div class="bi-chat-welcome">
                     <div class="bi-welcome-icon">◆</div>
-                    <h2>Привет! Я BI-ассистент Drivee</h2>
+                    <h2>Привет! Я аналитический ассистент Nexus Data Space</h2>
                     <p>Спросите что угодно про заказы, выручку, отмены или поведение пользователей. Я сама интерпретирую запрос, построю безопасный SQL и покажу результат.</p>
                     <div class="bi-welcome-examples">
                         @foreach (var t in _templates.Take(4))
@@ -182,7 +182,7 @@
     }
     private string _thinkingLabel = "Думаю…";
     private List<WorkspaceChatMessage> _messages => WorkspaceState.Messages;
-    private List<global::DriveeDataSpace.Core.Models.Report> _reports = new();
+    private List<global::NexusDataSpace.Core.Models.Report> _reports = new();
     private string _username = "";
     private string _displayName = "";
     private int _companyId = CompanyDefaults.DefaultCompanyId;
@@ -205,7 +205,7 @@
         "Среднее расстояние и длительность поездок"
     };
 
-    private sealed class ChatMsg : global::DriveeDataSpace.Web.Models.WorkspaceChatMessage { }
+    private sealed class ChatMsg : global::NexusDataSpace.Web.Models.WorkspaceChatMessage { }
 
     [SupplyParameterFromQuery(Name = "report")]
     public int? ReportId { get; set; }
@@ -242,13 +242,13 @@
         if (_messages.Count != _lastRenderedCount || _busy)
         {
             _lastRenderedCount = _messages.Count;
-            try { await JS.InvokeVoidAsync("driveeChat.scrollToBottom", "bi-chat-log"); } catch { }
+            try { await JS.InvokeVoidAsync("nexusDataSpaceChat.scrollToBottom", "bi-chat-log"); } catch { }
         }
     }
 
     private void RefreshReports() =>
         _reports = string.IsNullOrWhiteSpace(_username)
-            ? new List<global::DriveeDataSpace.Core.Models.Report>()
+            ? new List<global::NexusDataSpace.Core.Models.Report>()
             : Reports.ListForAuthor(_companyId, _username);
 
     private async Task OnKeyDown(KeyboardEventArgs e)

@@ -59,7 +59,7 @@ h1:focus {
     text-align: start;
 }
 
-/* ================= Drivee BI Workspace ================= */
+/* ================= Nexus Data Space Workspace ================= */
 .bi-workspace {
     display: grid;
     grid-template-columns: 280px 1fr;

@@ -1,7 +1,7 @@
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.Web.Models;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Web.Models;
 
-namespace DriveeDataSpace.Web.Services;
+namespace NexusDataSpace.Web.Services;
 
 public class WorkspaceSessionState
 {

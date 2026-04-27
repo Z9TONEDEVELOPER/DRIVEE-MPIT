@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed record AnalyticsTimeContext(
     DateTime SystemTodayUtc,

@@ -4,8 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>DriveeDataSpace.Core</AssemblyName>
-    <RootNamespace>DriveeDataSpace.Core</RootNamespace>
+    <AssemblyName>NexusDataSpace.Core</AssemblyName>
+    <RootNamespace>NexusDataSpace.Core</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   </PropertyGroup>

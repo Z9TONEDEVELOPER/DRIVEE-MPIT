@@ -1,6 +1,6 @@
 using Avalonia.Data.Converters;
 
-namespace DriveeDataSpace.DriveeDataSpace.Desktop.Converters;
+namespace NexusDataSpace.Desktop.Converters;
 
 public class BoolToProgressValueConverter : IValueConverter
 {

@@ -1,9 +1,9 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class LlmSettingsService
 {
@@ -58,9 +58,12 @@ public sealed class LlmSettingsService
         if (stored.Value == null && NormalizeCompanyId(companyId) == CompanyDefaults.DefaultCompanyId)
             stored = ReadSetting(GigaChatAuthorizationKey);
 
-        return string.IsNullOrWhiteSpace(stored.Value)
-            ? _configuration["Llm:Fallback:GigaChat:AuthorizationKey"]
-            : _secretProtector.Unprotect(stored.Value);
+        if (string.IsNullOrWhiteSpace(stored.Value))
+            return _configuration["Llm:Fallback:GigaChat:AuthorizationKey"];
+
+        return _secretProtector.TryUnprotect(stored.Value, out var authorizationKey)
+            ? authorizationKey
+            : _configuration["Llm:Fallback:GigaChat:AuthorizationKey"];
     }
 
     public LlmSettings SetProvider(string? provider)
@@ -183,6 +186,48 @@ public sealed class LlmSettingsService
                 updated_at TEXT NOT NULL
             );";
         command.ExecuteNonQuery();
+
+        MigrateProtectedSettings(connection);
+    }
+
+    private void MigrateProtectedSettings(SqliteConnection connection)
+    {
+        using var select = connection.CreateCommand();
+        select.CommandText = @"
+            SELECT key, value
+            FROM app_settings
+            WHERE key = $legacy_key
+               OR key LIKE $scoped_legacy_key";
+        select.Parameters.AddWithValue("$legacy_key", GigaChatAuthorizationKey);
+        select.Parameters.AddWithValue("$scoped_legacy_key", $"company:%:{GigaChatAuthorizationKey}");
+
+        var rows = new List<(string Key, string Value)>();
+        using (var reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+                rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Value) ||
+                _secretProtector.IsProtectedWithCurrentKey(row.Value) ||
+                !_secretProtector.TryUnprotect(row.Value, out var clearValue))
+            {
+                continue;
+            }
+
+            using var update = connection.CreateCommand();
+            update.CommandText = @"
+                UPDATE app_settings
+                SET value = $value,
+                    updated_at = $updated_at
+                WHERE key = $key";
+            update.Parameters.AddWithValue("$key", row.Key);
+            update.Parameters.AddWithValue("$value", _secretProtector.Protect(clearValue));
+            update.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
+            update.ExecuteNonQuery();
+        }
     }
 
     private SqliteConnection OpenConnection()

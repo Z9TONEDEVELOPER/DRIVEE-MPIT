@@ -1,6 +1,6 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 
-namespace DriveeDataSpace.Web.Models;
+namespace NexusDataSpace.Web.Models;
 
 public class WorkspaceChatMessage
 {

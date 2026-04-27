@@ -5,8 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
-    <AssemblyName>DriveeDataSpace.Web</AssemblyName>
-    <RootNamespace>DriveeDataSpace.Web</RootNamespace>
+    <AssemblyName>NexusDataSpace.Web</AssemblyName>
+    <RootNamespace>NexusDataSpace.Web</RootNamespace>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin-*/**;obj-*/**;.codex-build/**</DefaultItemExcludes>
     <UserSecretsId>871e2f84-fed8-4e04-a8d6-b86684e12315</UserSecretsId>
   </PropertyGroup>
@@ -14,7 +14,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageReference Include="Npgsql" Version="9.0.0" />
-    <ProjectReference Include="..\Core\DriveeDataSpace.Core.csproj" />
+    <ProjectReference Include="..\Core\NexusDataSpace.Core.csproj" />
   </ItemGroup>
 
 </Project>

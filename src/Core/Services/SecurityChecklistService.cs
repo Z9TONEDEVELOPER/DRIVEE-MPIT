@@ -1,8 +1,8 @@
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class SecurityChecklistService
 {
@@ -22,8 +22,8 @@ public sealed class SecurityChecklistService
 
     public SecurityChecklist Get(int companyId)
     {
-        const string authDevDefaultKey = "drivee-bi-local-dev-token-signing-key-change-me";
-        const string secretDevDefaultKey = "drivee-bi-local-dev-secret-protection-key-change-me";
+        const string authDevDefaultKey = "nexus-data-space-local-dev-token-signing-key-change-me";
+        const string secretDevDefaultKey = "nexus-data-space-local-dev-secret-protection-key-change-me";
 
         var authKey = _configuration["Auth:ApiTokenSigningKey"] ?? "";
         var secretKey = _configuration["Security:SecretProtectionKey"] ?? "";
