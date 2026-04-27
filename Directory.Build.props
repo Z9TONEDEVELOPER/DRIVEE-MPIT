@@ -5,7 +5,7 @@
         <Nullable>enable</Nullable>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <LangVersion>latest</LangVersion>
-        <AssemblyName>DriveeDataSpace.$(MSBuildProjectName)</AssemblyName>
+        <!-- Assembly names follow project file names, e.g. NexusDataSpace.Web. -->
         <!-- RootNamespace убран, чтобы не мешать автогенерации кода-behind в Avalonia -->
     </PropertyGroup>
 

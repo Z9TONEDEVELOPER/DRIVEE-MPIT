@@ -2,12 +2,12 @@ using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Services;
-using DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
-using DriveeDataSpace.Desktop.Views;
+using NexusDataSpace.Desktop.Services;
+using NexusDataSpace.Desktop.ViewModels;
+using NexusDataSpace.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DriveeDataSpace.Desktop;
+namespace NexusDataSpace.Desktop;
 
 public partial class App : Application
 {
@@ -22,7 +22,7 @@ public partial class App : Application
         {
             // URL инфраструктурного API. Web может работать отдельно как Blazor UI.
             client.BaseAddress = new Uri(
-                Environment.GetEnvironmentVariable("DRIVEE_API_URL")
+                Environment.GetEnvironmentVariable("NEXUS_DATA_SPACE_API_URL")
                 ?? "http://localhost:5099");
             client.Timeout = TimeSpan.FromSeconds(120);
         });

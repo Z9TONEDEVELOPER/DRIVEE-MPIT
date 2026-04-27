@@ -1,7 +1,7 @@
 using System.Security.Claims;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public static class UserPrincipalExtensions
 {

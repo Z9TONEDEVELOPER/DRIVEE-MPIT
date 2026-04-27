@@ -1,10 +1,10 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.ViewModels;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Desktop.Models;
+using NexusDataSpace.Desktop.ViewModels;
 
-namespace DriveeDataSpace.Desktop.Views;
+namespace NexusDataSpace.Desktop.Views;
 
 public partial class ChatMessageView : UserControl
 {

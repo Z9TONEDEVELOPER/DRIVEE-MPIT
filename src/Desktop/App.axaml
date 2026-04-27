@@ -1,8 +1,8 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="DriveeDataSpace.Desktop.App"
-             xmlns:local="using:DriveeDataSpace.Desktop"
-             xmlns:desktop="clr-namespace:DriveeDataSpace.DriveeDataSpace.Desktop"
+             x:Class="NexusDataSpace.Desktop.App"
+             xmlns:local="using:NexusDataSpace.Desktop"
+             xmlns:desktop="clr-namespace:NexusDataSpace.Desktop"
              RequestedThemeVariant="Light">
 
     <Application.DataTemplates>
@@ -13,7 +13,7 @@
         <FluentTheme />
 
         <!-- ════════════════════════════════════════════════════
-             DRIVEE BI — GLOBAL STYLES
+             NEXUS DATA SPACE — GLOBAL STYLES
              Цвета совпадают с Web app.css
              ════════════════════════════════════════════════════ -->
         <Style Selector="Window">

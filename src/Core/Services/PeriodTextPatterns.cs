@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 internal static class PeriodTextPatterns
 {

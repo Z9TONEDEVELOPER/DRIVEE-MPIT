@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed record SourceDefinition(
     string Key,

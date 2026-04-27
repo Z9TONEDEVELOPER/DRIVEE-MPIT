@@ -1,10 +1,10 @@
 using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
-using DriveeDataSpace.Core.Models;
-using DriveeDataSpace.DriveeDataSpace.Desktop.Models;
+using NexusDataSpace.Core.Models;
+using NexusDataSpace.Desktop.Models;
 
-namespace DriveeDataSpace.Desktop.Views;
+namespace NexusDataSpace.Desktop.Views;
 
 /// <summary>
 /// Все конвертеры доступны как static свойства класса Converters

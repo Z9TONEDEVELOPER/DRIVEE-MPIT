@@ -1,12 +1,12 @@
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 
-namespace DriveeDataSpace.DriveeDataSpace.Desktop.Services;
+namespace NexusDataSpace.Desktop.Services;
 
 /// <summary>
-/// Клиент для обращения к Web-бэкенду (DriveeDataSpace.Web).
+/// Клиент для обращения к Web-бэкенду (NexusDataSpace.Web).
 /// Desktop не содержит бизнес-логики — всё делает Web API.
 /// </summary>
 public class BiApiClient

@@ -1,6 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:scottplot="using:ScottPlot.Avalonia"
-             x:Class="DriveeDataSpace.Desktop.Views.ResultChartView">
+             x:Class="NexusDataSpace.Desktop.Views.ResultChartView">
     <scottplot:AvaPlot x:Name="Plot"/>
 </UserControl>

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public class DatasetSeeder
 {
@@ -14,7 +14,7 @@ public class DatasetSeeder
 
     public DatasetSeeder(IConfiguration config, IHostEnvironment environment, ILogger<DatasetSeeder> log)
     {
-        _dbPath = DataPathResolver.Resolve(environment, config["Data:AnalyticsDb"], "Data/drivee.db");
+        _dbPath = DataPathResolver.Resolve(environment, config["Data:AnalyticsDb"], "Data/nexus-data-space.db");
         _csvPath = DataPathResolver.Resolve(environment, config["Data:DatasetCsvPath"], "Data/train.csv");
         _log = log;
     }

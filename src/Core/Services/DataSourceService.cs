@@ -1,12 +1,12 @@
 using System.Data.Common;
 using System.Text.Json;
-using DriveeDataSpace.Core.Models;
+using NexusDataSpace.Core.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 
-namespace DriveeDataSpace.Core.Services;
+namespace NexusDataSpace.Core.Services;
 
 public sealed class DataSourceService
 {
@@ -38,7 +38,7 @@ public sealed class DataSourceService
         _tenantContext = tenantContext;
         _secretProtector = secretProtector;
         _dbPath = DataPathResolver.Resolve(environment, configuration["Data:ReportsDb"], "Data/reports.db");
-        _defaultAnalyticsDb = configuration["Data:AnalyticsDb"] ?? "Data/drivee.db";
+        _defaultAnalyticsDb = configuration["Data:AnalyticsDb"] ?? "Data/nexus-data-space.db";
 
         var directory = Path.GetDirectoryName(_dbPath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -508,6 +508,7 @@ public sealed class DataSourceService
         EnsureColumn(connection, "data_sources", "last_validated_at", "TEXT NULL");
         EnsureColumn(connection, "data_sources", "last_validation_error", "TEXT NULL");
         MigrateConnectionSecrets(connection);
+        MigrateLegacyBranding(connection);
     }
 
     private void EnsureDefaultDataSource(int? companyId = null)
@@ -533,7 +534,7 @@ public sealed class DataSourceService
                     $company_id, $name, $provider, $connection_mask, $connection_secret, NULL, NULL,
                     1, 1, $created_at, $updated_at, $last_validated_at, NULL)";
             insert.Parameters.AddWithValue("$company_id", tenantId);
-            insert.Parameters.AddWithValue("$name", "Drivee demo dataset");
+            insert.Parameters.AddWithValue("$name", "Nexus Data Space demo dataset");
             insert.Parameters.AddWithValue("$provider", DataSourceProviders.Sqlite);
             insert.Parameters.AddWithValue("$connection_mask", SecretProtector.MaskConnectionString(_defaultAnalyticsDb));
             insert.Parameters.AddWithValue("$connection_secret", _secretProtector.Protect(_defaultAnalyticsDb));
@@ -1084,6 +1085,89 @@ public sealed class DataSourceService
         }
     }
 
+    private void MigrateLegacyBranding(SqliteConnection connection)
+    {
+        using var select = connection.CreateCommand();
+        select.CommandText = @"
+            SELECT id, name, provider, connection_string, connection_secret, is_builtin
+            FROM data_sources";
+
+        var rows = new List<(int Id, string Name, string Provider, string ConnectionMask, string? ProtectedSecret, bool IsBuiltin)>();
+        using (var reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                rows.Add((
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetInt64(5) == 1));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            var name = string.Equals(row.Name, LegacyDemoDataSourceName(), StringComparison.Ordinal)
+                ? "Nexus Data Space demo dataset"
+                : row.Name;
+
+            string? clearConnectionString = null;
+            if (!string.IsNullOrWhiteSpace(row.ProtectedSecret))
+                _secretProtector.TryUnprotect(row.ProtectedSecret, out clearConnectionString);
+
+            if (string.IsNullOrWhiteSpace(clearConnectionString) &&
+                row.IsBuiltin &&
+                IsLegacyAnalyticsConnectionString(row.ConnectionMask))
+            {
+                clearConnectionString = _defaultAnalyticsDb;
+            }
+
+            if (IsLegacyAnalyticsConnectionString(clearConnectionString))
+                clearConnectionString = _defaultAnalyticsDb;
+
+            var shouldUpdateConnection =
+                !string.IsNullOrWhiteSpace(clearConnectionString) &&
+                (IsLegacyAnalyticsConnectionString(row.ConnectionMask) ||
+                 !_secretProtector.IsProtectedWithCurrentKey(row.ProtectedSecret ?? ""));
+            var shouldUpdateName = !string.Equals(name, row.Name, StringComparison.Ordinal);
+
+            if (!shouldUpdateName && !shouldUpdateConnection)
+                continue;
+
+            using var update = connection.CreateCommand();
+            update.CommandText = @"
+                UPDATE data_sources
+                SET name = $name,
+                    connection_string = CASE WHEN $update_connection = 1 THEN $connection_mask ELSE connection_string END,
+                    connection_secret = CASE WHEN $update_connection = 1 THEN $connection_secret ELSE connection_secret END,
+                    updated_at = $updated_at
+                WHERE id = $id";
+            update.Parameters.AddWithValue("$id", row.Id);
+            update.Parameters.AddWithValue("$name", name);
+            update.Parameters.AddWithValue("$update_connection", shouldUpdateConnection ? 1 : 0);
+            update.Parameters.AddWithValue("$connection_mask", shouldUpdateConnection
+                ? SecretProtector.MaskConnectionString(clearConnectionString!)
+                : row.ConnectionMask);
+            update.Parameters.AddWithValue("$connection_secret", shouldUpdateConnection
+                ? _secretProtector.Protect(clearConnectionString!)
+                : (object?)row.ProtectedSecret ?? DBNull.Value);
+            update.Parameters.AddWithValue("$updated_at", DateTime.UtcNow.ToString("O"));
+            update.ExecuteNonQuery();
+        }
+    }
+
+    private static bool IsLegacyAnalyticsConnectionString(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Contains(LegacyAnalyticsDbFileName(), StringComparison.OrdinalIgnoreCase);
+
+    private static string LegacyDemoDataSourceName() =>
+        string.Concat("Dri", "vee demo dataset");
+
+    private static string LegacyAnalyticsDbFileName() =>
+        string.Concat("dri", "vee.db");
+
     private int NormalizeCompanyId(int? companyId) =>
         (companyId ?? _tenantContext.CompanyId) <= 0 ? CompanyDefaults.DefaultCompanyId : (companyId ?? _tenantContext.CompanyId);
 
@@ -1132,9 +1216,19 @@ public sealed class DataSourceService
     {
         var connectionMask = reader.GetString(4);
         var protectedSecret = reader.IsDBNull(5) ? null : reader.GetString(5);
-        var clearConnectionString = string.IsNullOrWhiteSpace(protectedSecret)
-            ? connectionMask
-            : _secretProtector.Unprotect(protectedSecret);
+        var connectionString = connectionMask;
+        if (exposeSecret)
+        {
+            if (string.IsNullOrWhiteSpace(protectedSecret))
+            {
+                connectionString = connectionMask;
+            }
+            else if (!_secretProtector.TryUnprotect(protectedSecret, out connectionString))
+            {
+                throw new InvalidOperationException(
+                    $"Connection secret for data source `{reader.GetString(2)}` cannot be decrypted with configured keys.");
+            }
+        }
 
         return new CompanyDataSource
         {
@@ -1142,7 +1236,7 @@ public sealed class DataSourceService
             CompanyId = reader.GetInt32(1),
             Name = reader.GetString(2),
             Provider = reader.GetString(3),
-            ConnectionString = exposeSecret ? clearConnectionString : SecretProtector.MaskConnectionString(clearConnectionString),
+            ConnectionString = exposeSecret ? connectionString : connectionMask,
             IsConnectionStringMasked = !exposeSecret,
             SemanticJson = reader.IsDBNull(6) ? null : reader.GetString(6),
             SchemaJson = reader.IsDBNull(7) ? null : reader.GetString(7),

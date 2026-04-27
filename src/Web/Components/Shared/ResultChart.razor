@@ -1,5 +1,5 @@
-@using global::DriveeDataSpace.Core.Models
-@using global::DriveeDataSpace.Web.Models
+@using global::NexusDataSpace.Core.Models
+@using global::NexusDataSpace.Web.Models
 @using Microsoft.AspNetCore.Components
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
@@ -21,7 +21,7 @@
 </div>
 
 @code {
-    [Parameter] public global::DriveeDataSpace.Core.Models.QueryResult? Result { get; set; }
+    [Parameter] public global::NexusDataSpace.Core.Models.QueryResult? Result { get; set; }
     [Parameter] public string Type { get; set; } = "bar";
     [Parameter] public string Title { get; set; } = "";
 
@@ -69,7 +69,7 @@
 
         try
         {
-            await JS.InvokeVoidAsync("driveeCharts.render", _chartId, Type, labels, values, Title);
+            await JS.InvokeVoidAsync("nexusDataSpaceCharts.render", _chartId, Type, labels, values, Title);
         }
         catch (JSException) { }
         finally
@@ -83,7 +83,7 @@
 
     private async Task ResetZoom()
     {
-        try { await JS.InvokeVoidAsync("driveeCharts.resetZoom", _chartId); } catch { }
+        try { await JS.InvokeVoidAsync("nexusDataSpaceCharts.resetZoom", _chartId); } catch { }
     }
 
     private static double ToDouble(object? v) => v switch
@@ -99,6 +99,6 @@
 
     public async ValueTask DisposeAsync()
     {
-        try { await JS.InvokeVoidAsync("driveeCharts.destroy", _chartId); } catch { }
+        try { await JS.InvokeVoidAsync("nexusDataSpaceCharts.destroy", _chartId); } catch { }
     }
 }

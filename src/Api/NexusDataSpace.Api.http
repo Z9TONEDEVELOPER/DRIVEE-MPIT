@@ -1,0 +1,6 @@
+@NexusDataSpace.Api_HostAddress = http://localhost:5099
+
+GET {{NexusDataSpace.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
