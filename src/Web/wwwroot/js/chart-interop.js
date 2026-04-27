@@ -40,8 +40,8 @@ window.nexusDataSpaceCharts = (function () {
         destroy(id);
 
         const palette = [
-            '#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444',
-            '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6'
+            '#3B82F6', '#22D3EE', '#6366F1', '#00D1FF', '#38BDF8',
+            '#22C55E', '#F59E0B', '#EF4444', '#06B6D4', '#2563EB'
         ];
 
         const displayLabels = labels.map(formatLabel);
@@ -51,7 +51,15 @@ window.nexusDataSpaceCharts = (function () {
 
         const backgroundColors = type === 'pie'
             ? displayLabels.map((_, i) => palette[i % palette.length])
-            : 'rgba(79, 70, 229, 0.75)';
+            : (ctx) => {
+                const chart = ctx.chart;
+                const area = chart.chartArea;
+                if (!area) return '#3B82F6';
+                const gradient = chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
+                gradient.addColorStop(0, '#3B82F6');
+                gradient.addColorStop(1, '#00D1FF');
+                return gradient;
+            };
 
         const data = {
             labels: displayLabels,
@@ -59,14 +67,14 @@ window.nexusDataSpaceCharts = (function () {
                 label: title || '',
                 data: values,
                 backgroundColor: backgroundColors,
-                borderColor: type === 'line' ? '#4f46e5' : '#4f46e5',
+                borderColor: type === 'line' ? '#22D3EE' : '#3B82F6',
                 borderWidth: type === 'line' ? 2 : 1,
                 borderRadius: type === 'bar' ? 4 : 0,
                 pointRadius: type === 'line' ? 3 : 0,
                 pointHoverRadius: 5,
                 pointHitRadius: type === 'line' ? 14 : 0,
                 tension: 0.3,
-                fill: type === 'line' ? { target: 'origin', above: 'rgba(79,70,229,0.08)' } : true
+                fill: type === 'line' ? { target: 'origin', above: 'rgba(59,130,246,0.12)' } : true
             }]
         };
 
@@ -77,33 +85,37 @@ window.nexusDataSpaceCharts = (function () {
                 minRotation: needsRotation ? 35 : 0,
                 maxTicksLimit: Math.min(n, 24),
                 font: { size: 11 },
-                color: '#475569'
+                color: '#94A3B8'
             },
-            grid: { display: false },
-            border: { color: '#e5e7eb' }
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            border: { color: 'rgba(255,255,255,0.08)' }
         };
 
         const yAxis = {
             beginAtZero: true,
             ticks: {
                 font: { size: 11 },
-                color: '#64748b',
+                color: '#94A3B8',
                 callback: function (v) {
                     if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
                     if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(0) + 'k';
                     return v;
                 }
             },
-            grid: { color: '#f1f5f9' },
+            grid: { color: 'rgba(255,255,255,0.05)' },
             border: { display: false }
         };
 
         const isZoomable = type !== 'pie';
         const plugins = {
-            legend: { display: type === 'pie', position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
-            title: { display: !!title, text: title, font: { size: 13, weight: '600' }, color: '#1f2937', padding: { bottom: 10 } },
+            legend: { display: type === 'pie', position: 'right', labels: { boxWidth: 12, font: { size: 11 }, color: '#E2E8F0' } },
+            title: { display: !!title, text: title, font: { size: 13, weight: '600' }, color: '#F8FAFC', padding: { bottom: 10 } },
             tooltip: {
-                backgroundColor: '#0f172a',
+                backgroundColor: '#020617',
+                borderColor: 'rgba(59, 130, 246, 0.3)',
+                borderWidth: 1,
+                titleColor: '#F8FAFC',
+                bodyColor: '#E2E8F0',
                 titleFont: { size: 12, weight: '600' },
                 bodyFont: { size: 12 },
                 padding: 10,
@@ -128,8 +140,8 @@ window.nexusDataSpaceCharts = (function () {
                     drag: {
                         enabled: true,
                         modifierKey: 'shift',
-                        backgroundColor: 'rgba(79,70,229,0.15)',
-                        borderColor: 'rgba(79,70,229,0.6)',
+                        backgroundColor: 'rgba(59,130,246,0.15)',
+                        borderColor: 'rgba(0,209,255,0.6)',
                         borderWidth: 1
                     },
                     mode: 'x'

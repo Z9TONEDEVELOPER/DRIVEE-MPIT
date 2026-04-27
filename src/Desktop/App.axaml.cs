@@ -23,7 +23,7 @@ public partial class App : Application
             // URL инфраструктурного API. Web может работать отдельно как Blazor UI.
             client.BaseAddress = new Uri(
                 Environment.GetEnvironmentVariable("NEXUS_DATA_SPACE_API_URL")
-                ?? "http://localhost:5099");
+                ?? "http://localhost:5012");
             client.Timeout = TimeSpan.FromSeconds(120);
         });
 

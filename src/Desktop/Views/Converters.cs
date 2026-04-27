@@ -52,24 +52,24 @@ public static class Converters
 
     public static readonly IValueConverter ConfidenceBgConverter =
         new FuncConverter<double, IBrush>(c => c >= 0.7
-            ? Brush.Parse("#ecfdf5")
+            ? Brush.Parse("#1F22C55E")
             : c >= 0.4
-                ? Brush.Parse("#fffbeb")
-                : Brush.Parse("#fef2f2"));
+                ? Brush.Parse("#1FF59E0B")
+                : Brush.Parse("#1FEF4444"));
 
     public static readonly IValueConverter ConfidenceFgConverter =
         new FuncConverter<double, IBrush>(c => c >= 0.7
-            ? Brush.Parse("#047857")
+            ? Brush.Parse("#86EFAC")
             : c >= 0.4
-                ? Brush.Parse("#92400e")
-                : Brush.Parse("#b91c1c"));
+                ? Brush.Parse("#FCD34D")
+                : Brush.Parse("#FCA5A5"));
 
     public static readonly IValueConverter ConfidenceBorderConverter =
         new FuncConverter<double, IBrush>(c => c >= 0.7
-            ? Brush.Parse("#a7f3d0")
+            ? Brush.Parse("#5522C55E")
             : c >= 0.4
-                ? Brush.Parse("#fde68a")
-                : Brush.Parse("#fecaca"));
+                ? Brush.Parse("#55F59E0B")
+                : Brush.Parse("#55EF4444"));
 }
 
 // ── Generic functional converter ─────────────────────────────────────────────

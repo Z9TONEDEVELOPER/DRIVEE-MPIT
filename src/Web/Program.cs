@@ -53,6 +53,7 @@ builder.Services.AddSingleton<LlmSettingsService>();
 builder.Services.AddSingleton<SecurityChecklistService>();
 builder.Services.AddSingleton<LlmService>();
 builder.Services.AddSingleton<UserService>();
+builder.Services.AddSingleton<AuthTokenService>();
 builder.Services.AddSingleton<EmailService>();
 builder.Services.AddScoped<NlSqlEngine>();
 builder.Services.AddScoped<WorkspaceSessionState>();
@@ -79,6 +80,32 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated != true)
+    {
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            var token = authorization["Bearer ".Length..].Trim();
+            var session = context.RequestServices.GetRequiredService<AuthTokenService>().Validate(token);
+            if (session != null)
+            {
+                var claims = new List<Claim>
+                {
+                    new(ClaimTypes.NameIdentifier, session.Id.ToString()),
+                    new("company_id", session.CompanyId.ToString()),
+                    new(ClaimTypes.Name, session.Username),
+                    new(ClaimTypes.GivenName, session.DisplayName),
+                    new(ClaimTypes.Role, session.Role)
+                };
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+            }
+        }
+    }
+
+    await next();
+});
 app.UseAuthorization();
 app.UseAntiforgery();
 
@@ -138,6 +165,108 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     context.Response.Redirect("/login");
 }).DisableAntiforgery().AllowAnonymous();
+
+app.MapPost("/api/auth/login", (
+    LoginRequest request,
+    UserService users,
+    AuthTokenService tokens,
+    LoginRateLimitService loginRateLimit,
+    AuditLogService audit,
+    HttpContext context) =>
+{
+    var username = request.Username?.Trim() ?? "";
+    if (!loginRateLimit.TryAcquire(username, context.Connection.RemoteIpAddress?.ToString(), out var retryAfter))
+    {
+        var message = BuildRetryAfterMessage(retryAfter);
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, username, "auth.api_login.rate_limited", "user", success: false, details: message);
+        return Results.Json(new { error = message }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    var user = users.Authenticate(username, request.Password);
+    if (user == null)
+    {
+        audit.Record(CompanyDefaults.DefaultCompanyId, null, username, "auth.api_login", "user", success: false);
+        return Results.Unauthorized();
+    }
+
+    var session = tokens.CreateSession(user);
+    audit.Record(user.CompanyId, user.Id, user.Username, "auth.api_login", "user", user.Id.ToString(), success: true);
+    return Results.Ok(session);
+}).DisableAntiforgery().AllowAnonymous();
+
+app.MapGet("/api/admin/users", (UserService users, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    return Results.Ok(users.ListUsers(GetApiCompanyId(context)));
+});
+
+app.MapGet("/api/admin/company", (UserService users, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    return Results.Ok(users.GetCompany(GetApiCompanyId(context)));
+});
+
+app.MapPost("/api/admin/company", (UpdateCompanyRequest request, UserService users, AuditLogService audit, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    var company = users.UpdateCompany(GetApiCompanyId(context), request.Name);
+    audit.Record(company.Id, GetApiUserId(context), GetApiUserName(context), "company.update", "company", company.Id.ToString(), success: true, details: company.Name);
+    return Results.Ok(company);
+}).DisableAntiforgery();
+
+app.MapGet("/api/admin/registration-requests", (string? status, UserService users, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    return Results.Ok(users.ListRegistrationRequests(GetApiCompanyId(context), status));
+});
+
+app.MapPost("/api/admin/registration-requests/{id:int}/approve", (int id, UserService users, AuditLogService audit, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    var adminUserId = GetApiUserId(context) ?? 0;
+    var result = users.ApproveRegistrationRequest(GetApiCompanyId(context), id, adminUserId);
+    audit.Record(GetApiCompanyId(context), adminUserId, GetApiUserName(context), "registration.approve", "registration_request", id.ToString(), success: true);
+    return Results.Ok(result);
+}).DisableAntiforgery();
+
+app.MapPost("/api/admin/registration-requests/{id:int}/reject", (int id, RejectRegistrationRequest request, UserService users, AuditLogService audit, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    var adminUserId = GetApiUserId(context) ?? 0;
+    var result = users.RejectRegistrationRequest(GetApiCompanyId(context), id, adminUserId, request.Reason);
+    audit.Record(GetApiCompanyId(context), adminUserId, GetApiUserName(context), "registration.reject", "registration_request", id.ToString(), success: true, details: request.Reason);
+    return Results.Ok(result);
+}).DisableAntiforgery();
+
+app.MapGet("/api/admin/llm-settings", (LlmSettingsService llmSettings, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    return Results.Ok(llmSettings.Get(GetApiCompanyId(context)));
+});
+
+app.MapPost("/api/admin/llm-settings", (UpdateLlmSettingsRequest request, LlmSettingsService llmSettings, AuditLogService audit, HttpContext context) =>
+{
+    if (!IsApiAdmin(context))
+        return Results.Forbid();
+
+    var settings = llmSettings.Save(request, GetApiCompanyId(context));
+    audit.Record(GetApiCompanyId(context), GetApiUserId(context), GetApiUserName(context), "llm_settings.update", "llm_settings", success: true, details: settings.Provider);
+    return Results.Ok(settings);
+}).DisableAntiforgery();
 
 app.MapPost("/api/query", async (
     QueryRequest request,

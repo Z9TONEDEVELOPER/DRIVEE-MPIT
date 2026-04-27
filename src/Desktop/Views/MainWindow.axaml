@@ -15,27 +15,25 @@
         <viewModels:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid ColumnDefinitions="280,*" Background="#f7f8fb">
+    <Grid ColumnDefinitions="280,*" Background="#0B1220">
         <Border Grid.Column="0"
-                Background="#0f172a"
+                Background="#0E1628"
                 Padding="14,18">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <Border Classes="bi-logo">
-                            <TextBlock Text="◆"
-                                       FontSize="18"
-                                       Foreground="White"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"/>
+                            <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                                   Stretch="Uniform"
+                                   Margin="7"/>
                         </Border>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="Nexus Data Space"
-                                       Foreground="White"
+                                       Foreground="#F8FAFC"
                                        FontWeight="Bold"
                                        FontSize="15"/>
                             <TextBlock Text="NL → SQL аналитика"
-                                       Foreground="#94a3b8"
+                                       Foreground="#94A3B8"
                                        FontSize="11"/>
                         </StackPanel>
                     </StackPanel>
@@ -43,15 +41,15 @@
                     <Border Classes="user-card">
                         <StackPanel Spacing="8">
                             <TextBlock Text="СЕАНС"
-                                       Foreground="#94a3b8"
+                                       Foreground="#94A3B8"
                                        FontSize="10"
                                        FontWeight="SemiBold"
                                        LetterSpacing="1"/>
                             <TextBlock Text="{Binding DisplayName}"
-                                       Foreground="#f8fafc"
+                                       Foreground="#F8FAFC"
                                        FontSize="15"
                                        FontWeight="Bold"/>
-                            <TextBlock Foreground="#cbd5e1"
+                            <TextBlock Foreground="#CBD5E1"
                                        FontSize="12"
                                        TextWrapping="Wrap">
                                 <Run Text="{Binding Username}"/>
@@ -96,7 +94,7 @@
                 <ScrollViewer DockPanel.Dock="Bottom" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="12" Margin="0,16,0,0">
                         <TextBlock Text="ШАБЛОНЫ ЗАПРОСОВ"
-                                   Foreground="#94a3b8"
+                                   Foreground="#94A3B8"
                                    FontSize="11"
                                    FontWeight="SemiBold"
                                    LetterSpacing="1"/>
@@ -114,14 +112,14 @@
                         </ItemsControl>
 
                         <TextBlock Text="СОХРАНЁННЫЕ ОТЧЁТЫ"
-                                   Foreground="#94a3b8"
+                                   Foreground="#94A3B8"
                                    FontSize="11"
                                    FontWeight="SemiBold"
                                    LetterSpacing="1"
                                    Margin="0,8,0,0"/>
 
                         <TextBlock Text="Тут будут появляться ваши сохраненные отчеты"
-                                   Foreground="#94a3b8"
+                                   Foreground="#94A3B8"
                                    FontSize="12"
                                    FontStyle="Italic"
                                    TextWrapping="Wrap"
@@ -152,7 +150,7 @@
         </Border>
 
         <Grid Grid.Column="1">
-            <DockPanel Background="#f7f8fb"
+            <DockPanel Background="#0B1220"
                        IsVisible="{Binding IsWorkspacePage}">
                 <Border DockPanel.Dock="Top"
                         Classes="chat-header">
@@ -160,10 +158,10 @@
                         <TextBlock Text="Чат с данными"
                                    FontSize="18"
                                    FontWeight="Bold"
-                                   Foreground="#0f172a"/>
+                                   Foreground="#F8FAFC"/>
                         <TextBlock Text="Спросил → система поняла → построила SQL → показала результат"
                                    FontSize="12"
-                                   Foreground="#64748b"
+                                   Foreground="#94A3B8"
                                    Margin="0,2,0,0"/>
                     </StackPanel>
                 </Border>
@@ -177,7 +175,7 @@
                                          x:Name="ChatInputBox"
                                          Classes="chat-input"
                                          Text="{Binding Chat.InputText}"
-                                         PlaceholderText="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
+                                         Watermark="Спросите у данных… (Enter — отправить, Shift+Enter — новая строка)"
                                          IsEnabled="{Binding !Chat.IsBusy}"
                                          KeyDown="ChatInput_KeyDown"
                                          MaxHeight="200"/>
@@ -191,7 +189,7 @@
                         </Border>
                         <TextBlock Text="Вы задаёте вопрос — система сама находит нужные данные и визуализирует результат (работает только с чтением данных)"
                                    FontSize="11"
-                                   Foreground="#94a3b8"
+                                   Foreground="#94A3B8"
                                    HorizontalAlignment="Center"
                                    Margin="0,6,0,0"/>
                     </StackPanel>
@@ -200,45 +198,45 @@
                 <ScrollViewer x:Name="ChatScrollViewer"
                               VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="18" Margin="0,24">
-                        <StackPanel Classes="chat-welcome"
-                                    IsVisible="{Binding Chat.IsEmpty}">
-                            <Border Classes="welcome-icon">
-                                <TextBlock Text="◆"
-                                           Foreground="White"
-                                           FontSize="28"
+                        <Border Classes="welcome-panel"
+                                IsVisible="{Binding Chat.IsEmpty}">
+                            <StackPanel Classes="chat-welcome">
+                                <Border Classes="welcome-icon">
+                                    <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                                           Stretch="Uniform"
+                                           Margin="13"/>
+                                </Border>
+                                <TextBlock Text="Привет! Я аналитический ассистент Nexus Data Space"
+                                           FontSize="26"
+                                           FontWeight="Bold"
                                            HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"/>
-                            </Border>
-                            <TextBlock Text="Привет! Я аналитический ассистент Nexus Data Space"
-                                       FontSize="22"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Center"
-                                       Foreground="#0f172a"
-                                       Margin="0,0,0,8"/>
-                            <TextBlock Text="Спросите что угодно про заказы, выручку, отмены или поведение пользователей. Я сама интерпретирую запрос, построю безопасный SQL и покажу результат."
-                                       FontSize="14"
-                                       Foreground="#64748b"
-                                       TextWrapping="Wrap"
-                                       HorizontalAlignment="Center"
-                                       TextAlignment="Center"
-                                       Margin="0,0,0,22"/>
-                            <ItemsControl ItemsSource="{Binding Chat.Templates}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel HorizontalAlignment="Center"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Button Content="{Binding}"
-                                                Classes="welcome-example"
-                                                Margin="4"
-                                                Command="{Binding $parent[Window].DataContext.Chat.RunTemplateCommand}"
-                                                CommandParameter="{Binding}"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
+                                           Foreground="#F8FAFC"
+                                           Margin="0,0,0,8"/>
+                                <TextBlock Text="Спросите что угодно про заказы, выручку, отмены или поведение пользователей. Я сама интерпретирую запрос, построю безопасный SQL и покажу результат."
+                                           FontSize="14"
+                                           Foreground="#94A3B8"
+                                           TextWrapping="Wrap"
+                                           HorizontalAlignment="Center"
+                                           TextAlignment="Center"
+                                           Margin="0,0,0,22"/>
+                                <ItemsControl ItemsSource="{Binding Chat.Templates}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel HorizontalAlignment="Center"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding}"
+                                                    Classes="welcome-example"
+                                                    Margin="7"
+                                                    Command="{Binding $parent[Window].DataContext.Chat.RunTemplateCommand}"
+                                                    CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
 
                         <ItemsControl ItemsSource="{Binding Chat.Messages}"
                                       IsVisible="{Binding !Chat.IsEmpty}">
@@ -253,11 +251,9 @@
                               IsVisible="{Binding Chat.IsBusy}">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <Border Classes="avatar">
-                                    <TextBlock Text="◆"
-                                               Foreground="White"
-                                               FontSize="13"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"/>
+                                    <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                                           Stretch="Uniform"
+                                           Margin="7"/>
                                 </Border>
                                 <Border Classes="bot-bubble thinking-bubble">
                                     <StackPanel Orientation="Horizontal" Spacing="10">
@@ -267,7 +263,7 @@
                                             <Border Classes="typing-dot"/>
                                         </StackPanel>
                                         <TextBlock Text="{Binding Chat.ThinkingLabel}"
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    FontSize="13"
                                                    VerticalAlignment="Center"/>
                                     </StackPanel>
@@ -278,7 +274,7 @@
                 </ScrollViewer>
             </DockPanel>
 
-            <DockPanel Background="#f7f8fb"
+            <DockPanel Background="#0B1220"
                        IsVisible="{Binding IsReportsPage}">
                 <Border DockPanel.Dock="Top"
                         Classes="chat-header">
@@ -286,10 +282,10 @@
                         <TextBlock Text="Сохранённые отчёты"
                                    FontSize="18"
                                    FontWeight="Bold"
-                                   Foreground="#0f172a"/>
+                                   Foreground="#F8FAFC"/>
                         <TextBlock Text="Desktop показывает те же отчёты, которые сохраняются через общий Core/API контракт."
                                    FontSize="12"
-                                   Foreground="#64748b"
+                                   Foreground="#94A3B8"
                                    Margin="0,2,0,0"/>
                     </StackPanel>
                 </Border>
@@ -298,7 +294,7 @@
                     <Border Classes="empty-card"
                             IsVisible="{Binding Chat.Reports.Count, Converter={x:Static views:Converters.IsZeroConverter}}">
                         <TextBlock Text="Пока нет сохранённых отчётов. Перейдите в Workspace и создайте первый."
-                                   Foreground="#64748b"
+                                   Foreground="#94A3B8"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    HorizontalAlignment="Center"
@@ -313,7 +309,7 @@
                                       GridLinesVisibility="Horizontal"
                                       HeadersVisibility="Column"
                                       BorderThickness="0"
-                                      Background="White"
+                                      Background="#111A2E"
                                       CanUserReorderColumns="False"
                                       CanUserResizeColumns="True"
                                       CanUserSortColumns="True">
@@ -354,7 +350,7 @@
                 </Grid>
             </DockPanel>
 
-            <DockPanel Background="#f7f8fb"
+            <DockPanel Background="#0B1220"
                        IsVisible="{Binding IsUsersPage}">
                 <Border DockPanel.Dock="Top"
                         Classes="chat-header">
@@ -362,36 +358,36 @@
                         <TextBlock Text="Пользователи"
                                    FontSize="18"
                                    FontWeight="Bold"
-                                   Foreground="#0f172a"/>
+                                   Foreground="#F8FAFC"/>
                         <TextBlock Text="Админский контур Desktop использует тот же UserService и заявки, что и Web."
                                    FontSize="12"
-                                   Foreground="#64748b"
+                                   Foreground="#94A3B8"
                                    Margin="0,2,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="28,24" Spacing="18">
-                        <Border Background="#fef2f2"
-                                BorderBrush="#fecaca"
+                        <Border Background="#2A1119"
+                                BorderBrush="#7F1D1D"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="10,8"
                                 IsVisible="{Binding AdminError, Converter={x:Static views:Converters.IsNotNullConverter}}">
                             <TextBlock Text="{Binding AdminError}"
-                                       Foreground="#991b1b"
+                                       Foreground="#FCA5A5"
                                        FontSize="12.5"
                                        TextWrapping="Wrap"/>
                         </Border>
 
-                        <Border Background="#ecfdf5"
-                                BorderBrush="#a7f3d0"
+                        <Border Background="#0D2418"
+                                BorderBrush="#14532D"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="10,8"
                                 IsVisible="{Binding AdminNotice, Converter={x:Static views:Converters.IsNotNullConverter}}">
                             <TextBlock Text="{Binding AdminNotice}"
-                                       Foreground="#047857"
+                                       Foreground="#22C55E"
                                        FontSize="12.5"
                                        TextWrapping="Wrap"/>
                         </Border>
@@ -401,10 +397,10 @@
                                 <TextBlock Text="Компания"
                                            FontSize="15"
                                            FontWeight="Bold"
-                                           Foreground="#0f172a"/>
+                                           Foreground="#F8FAFC"/>
                                 <TextBlock Text="{Binding CompanyLabel}"
                                            FontSize="12.5"
-                                           Foreground="#475569"
+                                           Foreground="#94A3B8"
                                            TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -416,10 +412,10 @@
                                         <TextBlock Text="LLM provider"
                                                    FontSize="15"
                                                    FontWeight="Bold"
-                                                   Foreground="#0f172a"/>
+                                                   Foreground="#F8FAFC"/>
                                         <TextBlock Text="Выбор между локальным сервером и GigaChat. Ключ можно заменить, существующий ключ не показывается."
                                                    FontSize="12"
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <Button Grid.Column="1"
@@ -432,7 +428,7 @@
                                 <Grid ColumnDefinitions="260,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
                                     <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
                                         <TextBlock Text="Провайдер"
-                                                   Foreground="#475569"
+                                                   Foreground="#94A3B8"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"/>
                                         <ComboBox ItemsSource="{Binding LlmProviderOptions}"
@@ -443,51 +439,51 @@
 
                                     <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
                                         <TextBlock Text="Сейчас выбран"
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding CurrentLlmProviderLabel}"
-                                                   Foreground="#0f172a"
+                                                   Foreground="#F8FAFC"
                                                    FontSize="14"
                                                    FontWeight="Bold"/>
                                     </StackPanel>
 
                                     <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
                                         <TextBlock Text="Локальный сервер"
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding LocalLlmLabel}"
-                                                   Foreground="#334155"
+                                                   Foreground="#E2E8F0"
                                                    FontSize="12"
                                                    TextWrapping="Wrap"/>
                                     </StackPanel>
 
                                     <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
                                         <TextBlock Text="GigaChat"
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding GigaChatLabel}"
-                                                   Foreground="#334155"
+                                                   Foreground="#E2E8F0"
                                                    FontSize="12"/>
                                         <TextBlock Text="{Binding GigaChatSecretStatus}"
-                                                   Foreground="#047857"
+                                                   Foreground="#22C55E"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"/>
                                     </StackPanel>
 
                                     <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Spacing="6">
                                         <TextBlock Text="GigaChat AuthorizationKey"
-                                                   Foreground="#475569"
+                                                   Foreground="#94A3B8"
                                                    FontSize="12"
                                                    FontWeight="SemiBold"/>
                                         <TextBox Text="{Binding GigaChatAuthorizationKey, Mode=TwoWay}"
                                                  PasswordChar="*"
-                                                 PlaceholderText="Новый ключ, если нужно заменить"
+                                                 Watermark="Новый ключ, если нужно заменить"
                                                  IsEnabled="{Binding !IsSavingLlmSettings}"/>
                                         <TextBlock Text="При сохранении ключ шифруется в metadata DB и не возвращается обратно в UI."
-                                                   Foreground="#64748b"
+                                                   Foreground="#94A3B8"
                                                    FontSize="11.5"
                                                    TextWrapping="Wrap"/>
                                     </StackPanel>
@@ -502,10 +498,10 @@
                                         <TextBlock Text="Заявки на доступ"
                                                    FontSize="15"
                                                    FontWeight="Bold"
-                                                   Foreground="#0f172a"/>
+                                                   Foreground="#F8FAFC"/>
                                         <TextBlock Text="Ожидают решения администратора"
                                                    FontSize="12"
-                                                   Foreground="#64748b"/>
+                                                   Foreground="#94A3B8"/>
                                     </StackPanel>
                                     <Button Grid.Column="1"
                                             Content="Обновить"
@@ -514,7 +510,7 @@
                                 </Grid>
 
                                 <TextBlock Text="Новых заявок нет"
-                                           Foreground="#64748b"
+                                           Foreground="#94A3B8"
                                            FontSize="13"
                                            TextAlignment="Center"
                                            Margin="16,0,16,16"
@@ -558,7 +554,7 @@
                                 <TextBlock Text="Пользователи"
                                            FontSize="15"
                                            FontWeight="Bold"
-                                           Foreground="#0f172a"
+                                           Foreground="#F8FAFC"
                                            Margin="16,14"/>
                                 <DataGrid ItemsSource="{Binding Users}"
                                           AutoGenerateColumns="False"
@@ -583,7 +579,7 @@
         </Grid>
 
         <Border Grid.ColumnSpan="2"
-                Background="#f7f8fb"
+                Background="#0B1220"
                 IsVisible="{Binding !IsAuthenticated}">
             <Grid>
                 <Border Classes="login-card"
@@ -592,32 +588,30 @@
                     <StackPanel Spacing="14" Width="380">
                         <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                             <Border Classes="welcome-icon" Margin="0">
-                                <TextBlock Text="◆"
-                                           Foreground="White"
-                                           FontSize="28"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"/>
+                                <Image Source="avares://NexusDataSpace.Desktop/Assets/Icons/logo-NEXUS-mark.png"
+                                       Stretch="Uniform"
+                                       Margin="13"/>
                             </Border>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="Nexus Data Space"
-                                           Foreground="#0f172a"
+                                           Foreground="#F8FAFC"
                                            FontSize="22"
                                            FontWeight="Bold"/>
                                 <TextBlock Text="Вход в Desktop"
-                                           Foreground="#64748b"
+                                           Foreground="#94A3B8"
                                            FontSize="13"/>
                             </StackPanel>
                         </StackPanel>
 
                         <TextBlock Text="Используйте ту же учетную запись, что и в Web."
-                                   Foreground="#64748b"
+                                   Foreground="#94A3B8"
                                    FontSize="13"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"/>
 
                         <StackPanel Spacing="6">
                             <TextBlock Text="Логин"
-                                       Foreground="#475569"
+                                       Foreground="#94A3B8"
                                        FontSize="12"
                                        FontWeight="SemiBold"/>
                             <TextBox Classes="login-input"
@@ -627,7 +621,7 @@
 
                         <StackPanel Spacing="6">
                             <TextBlock Text="Пароль"
-                                       Foreground="#475569"
+                                       Foreground="#94A3B8"
                                        FontSize="12"
                                        FontWeight="SemiBold"/>
                             <TextBox Classes="login-input"
@@ -637,14 +631,14 @@
                                      KeyDown="LoginPassword_KeyDown"/>
                         </StackPanel>
 
-                        <Border Background="#fef2f2"
-                                BorderBrush="#fecaca"
+                        <Border Background="#2A1119"
+                                BorderBrush="#7F1D1D"
                                 BorderThickness="1"
                                 CornerRadius="8"
                                 Padding="10,8"
                                 IsVisible="{Binding LoginError, Converter={x:Static views:Converters.IsNotNullConverter}}">
                             <TextBlock Text="{Binding LoginError}"
-                                       Foreground="#991b1b"
+                                       Foreground="#FCA5A5"
                                        FontSize="12.5"
                                        TextWrapping="Wrap"/>
                         </Border>

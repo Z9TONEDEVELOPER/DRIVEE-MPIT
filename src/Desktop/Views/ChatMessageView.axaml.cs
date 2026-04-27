@@ -8,6 +8,8 @@ namespace NexusDataSpace.Desktop.Views;
 
 public partial class ChatMessageView : UserControl
 {
+    private string? _renderedKey;
+
     public ChatMessageView()
     {
         InitializeComponent();
@@ -20,15 +22,7 @@ public partial class ChatMessageView : UserControl
         {
             // Установить активный viz-таб
             UpdateVizTabStyles(msg.Visualization);
-            // Отрисовать начальный чарт
-            if (msg.Result?.Result != null)
-            {
-                TableView.SetData(msg.Result.Result);
-                ChartView.IsVisible = msg.Visualization != "table";
-                TableView.IsVisible = msg.Visualization == "table";
-                if (msg.Visualization != "table")
-                    ChartView.Render(msg.Result.Result, msg.Visualization);
-            }
+            RenderResultOnce(msg);
         }
     }
 
@@ -74,10 +68,20 @@ public partial class ChatMessageView : UserControl
         UpdateVizTabStyles(viz);
 
         if (msg.Result?.Result != null)
-            ChartView.Render(msg.Result.Result, viz);
+        {
+            if (viz == "table")
+            {
+                ChartView.IsVisible = false;
+                TableView.IsVisible = true;
+                return;
+            }
 
-        ChartView.IsVisible = viz != "table";
-        TableView.IsVisible = viz == "table";
+            var rendered = ChartView.Render(msg.Result.Result, viz);
+            ChartView.IsVisible = rendered;
+            TableView.IsVisible = !rendered;
+            if (!rendered)
+                msg.Visualization = "table";
+        }
     }
 
     private void UpdateVizTabStyles(string activeViz)
@@ -94,6 +98,37 @@ public partial class ChatMessageView : UserControl
                 }
             }
         }
+    }
+
+    private void RenderResultOnce(ChatMessage msg)
+    {
+        if (msg.Result?.Result == null)
+            return;
+
+        var key = $"{msg.Id}:{msg.Visualization}:{msg.Result.Result.RowCount}:{msg.Result.Result.Columns.Count}";
+        if (string.Equals(_renderedKey, key, StringComparison.Ordinal))
+            return;
+
+        TableView.SetData(msg.Result.Result);
+
+        if (msg.Visualization == "table")
+        {
+            ChartView.IsVisible = false;
+            TableView.IsVisible = true;
+            _renderedKey = key;
+            return;
+        }
+
+        var rendered = ChartView.Render(msg.Result.Result, msg.Visualization);
+        ChartView.IsVisible = rendered;
+        TableView.IsVisible = !rendered;
+        if (!rendered)
+        {
+            msg.Visualization = "table";
+            UpdateVizTabStyles("table");
+        }
+
+        _renderedKey = key;
     }
 
     // ── Save report ──────────────────────────────────────────────────────────

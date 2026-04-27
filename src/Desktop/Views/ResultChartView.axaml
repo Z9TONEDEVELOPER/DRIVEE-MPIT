@@ -1,6 +1,14 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:scottplot="using:ScottPlot.Avalonia"
+             xmlns:ScottPlot="clr-namespace:ScottPlot.Avalonia;assembly=ScottPlot.Avalonia"
              x:Class="NexusDataSpace.Desktop.Views.ResultChartView">
-    <scottplot:AvaPlot x:Name="Plot"/>
+    <Border Background="#111A2E"
+            BorderBrush="#14FFFFFF"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="10"
+            ClipToBounds="True">
+        <ScottPlot:AvaPlot x:Name="Plot"
+                           MinHeight="260"/>
+    </Border>
 </UserControl>
