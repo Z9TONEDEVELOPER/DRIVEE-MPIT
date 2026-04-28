@@ -19,6 +19,7 @@ public class LlmService
     private readonly TenantContext _tenantContext;
     private readonly LoadCacheService _cache;
     private readonly OperationalMetricsService _metrics;
+    private readonly SemanticLayer _semanticLayer;
     private readonly string _endpoint;
     private readonly string _model;
     private readonly bool _usesSimpleChatApi;
@@ -31,6 +32,8 @@ public class LlmService
     private readonly bool _fastHeuristicEnabled;
     private readonly double _fastHeuristicConfidenceThreshold;
     private readonly string _fallbackProvider;
+    private readonly string _localStructuredOutputMode;
+    private readonly string _gigaChatStructuredOutputMode;
     private readonly string _gigaChatScope;
     private readonly string _gigaChatAuthUrl;
     private readonly string _gigaChatBaseUrl;
@@ -46,6 +49,7 @@ public class LlmService
         TenantContext tenantContext,
         LoadCacheService cache,
         OperationalMetricsService metrics,
+        SemanticLayer semanticLayer,
         ILogger<LlmService> logger)
     {
         _httpClient = httpClientFactory.CreateClient("llm");
@@ -53,6 +57,7 @@ public class LlmService
         _tenantContext = tenantContext;
         _cache = cache;
         _metrics = metrics;
+        _semanticLayer = semanticLayer;
         _logger = logger;
         _endpoint = configuration["Llm:Endpoint"] ?? "http://localhost:1234/api/v1/chat";
         _model = configuration["Llm:Model"] ?? "qwen2.5-coder-7b-instruct";
@@ -66,6 +71,12 @@ public class LlmService
         _fastHeuristicEnabled = !bool.TryParse(configuration["Llm:FastHeuristicEnabled"], out var fastHeuristicEnabled) || fastHeuristicEnabled;
         _fastHeuristicConfidenceThreshold = ReadBoundedDouble(configuration, "Llm:FastHeuristicConfidenceThreshold", 0.7, 0.5, 0.95);
         _fallbackProvider = LlmProviders.Normalize(configuration["Llm:Fallback:Provider"]);
+        _localStructuredOutputMode = StructuredOutputModes.Normalize(
+            configuration["Llm:StructuredOutputMode"],
+            StructuredOutputModes.JsonSchema);
+        _gigaChatStructuredOutputMode = StructuredOutputModes.Normalize(
+            configuration["Llm:Fallback:GigaChat:StructuredOutputMode"],
+            StructuredOutputModes.JsonObject);
         _gigaChatScope = configuration["Llm:Fallback:GigaChat:Scope"] ?? "GIGACHAT_API_PERS";
         _gigaChatAuthUrl = configuration["Llm:Fallback:GigaChat:AuthUrl"] ?? "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
         _gigaChatBaseUrl = (configuration["Llm:Fallback:GigaChat:BaseUrl"] ?? "https://gigachat.devices.sberbank.ru/api/v1").TrimEnd('/');
@@ -267,13 +278,17 @@ public class LlmService
             }
 
             messages.Add(new { role = "user", content = userQuery });
-            var payload = new
+            var payload = new Dictionary<string, object?>
             {
-                model = _gigaChatModel,
-                messages,
-                temperature = _temperature,
-                max_tokens = _maxOutputTokens
+                ["model"] = _gigaChatModel,
+                ["messages"] = messages,
+                ["temperature"] = _temperature,
+                ["max_tokens"] = _maxOutputTokens
             };
+
+            var gigaChatResponseFormat = BuildResponseFormat(_gigaChatStructuredOutputMode);
+            if (gigaChatResponseFormat != null)
+                payload["response_format"] = gigaChatResponseFormat;
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_gigaChatBaseUrl}/chat/completions")
             {
@@ -404,14 +419,21 @@ public class LlmService
 
     private object BuildLocalPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history)
     {
+        var responseFormat = BuildResponseFormat(_localStructuredOutputMode);
+
         if (_usesSimpleChatApi)
         {
-            return new
+            var simplePayload = new Dictionary<string, object?>
             {
-                model = _model,
-                system_prompt = systemPrompt,
-                input = BuildFlatInput(userQuery, history, _maxHistoryTurns)
+                ["model"] = _model,
+                ["system_prompt"] = systemPrompt,
+                ["input"] = BuildFlatInput(userQuery, history, _maxHistoryTurns)
             };
+
+            if (responseFormat != null)
+                simplePayload["response_format"] = responseFormat;
+
+            return simplePayload;
         }
 
         var messages = new List<object> { new { role = "system", content = systemPrompt } };
@@ -422,13 +444,49 @@ public class LlmService
         }
 
         messages.Add(new { role = "user", content = userQuery });
-        return new
+
+        var payload = new Dictionary<string, object?>
         {
-            model = _model,
-            temperature = _temperature,
-            max_tokens = _maxOutputTokens,
-            messages = messages.ToArray()
+            ["model"] = _model,
+            ["temperature"] = _temperature,
+            ["max_tokens"] = _maxOutputTokens,
+            ["messages"] = messages.ToArray()
         };
+
+        if (responseFormat != null)
+            payload["response_format"] = responseFormat;
+
+        return payload;
+    }
+
+    private object? BuildResponseFormat(string mode)
+    {
+        switch (mode)
+        {
+            case StructuredOutputModes.JsonSchema:
+                try
+                {
+                    return new
+                    {
+                        type = "json_schema",
+                        json_schema = new
+                        {
+                            name = IntentJsonSchema.SchemaName,
+                            strict = true,
+                            schema = IntentJsonSchema.Build(_semanticLayer)
+                        }
+                    };
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogWarning(exception, "Failed to build JSON schema for structured output. Falling back to json_object mode.");
+                    return new { type = "json_object" };
+                }
+            case StructuredOutputModes.JsonObject:
+                return new { type = "json_object" };
+            default:
+                return null;
+        }
     }
 
     private static QueryIntent? ParseIntentResponse(string responseBody)

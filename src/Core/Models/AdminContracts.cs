@@ -24,6 +24,27 @@ public static class LlmProviders
     }
 }
 
+public static class StructuredOutputModes
+{
+    public const string JsonSchema = "json_schema";
+    public const string JsonObject = "json_object";
+    public const string Off = "off";
+
+    public static string Normalize(string? mode, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return fallback;
+
+        return mode.Trim().ToLowerInvariant() switch
+        {
+            JsonSchema or "schema" or "strict" => JsonSchema,
+            JsonObject or "json" => JsonObject,
+            Off or "none" or "disabled" or "false" => Off,
+            _ => fallback
+        };
+    }
+}
+
 public sealed record LlmSettings(
     string Provider,
     string LocalEndpoint,
