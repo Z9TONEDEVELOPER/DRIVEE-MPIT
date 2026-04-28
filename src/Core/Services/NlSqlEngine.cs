@@ -112,10 +112,11 @@ public class NlSqlEngine
             var fewShotExamples = _fewShotMaxExamples > 0
                 ? _fewShotProvider.SelectFor(userQuery, _fewShotMaxExamples)
                 : Array.Empty<FewShotExample>();
+            var systemPrompt = PromptTemplates.SystemPrompt(_semanticLayer, fewShotExamples);
             var llmStopwatch = Stopwatch.StartNew();
             var rawIntent = await _llmService.InterpretAsync(
                 userQuery,
-                PromptTemplates.SystemPrompt(_semanticLayer, fewShotExamples),
+                systemPrompt,
                 history,
                 cancellationToken);
             llmStopwatch.Stop();
@@ -123,6 +124,42 @@ public class NlSqlEngine
 
             var validation = _intentValidator.ValidateParsedIntent(rawIntent, userQuery, previousIntent);
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (ShouldAttemptRepair(rawIntent, validation))
+            {
+                var repairStopwatch = Stopwatch.StartNew();
+                var repairedIntent = await _llmService.RepairIntentAsync(
+                    userQuery,
+                    systemPrompt,
+                    rawIntent,
+                    validation.Clarification ?? "Intent failed validation.",
+                    history,
+                    cancellationToken);
+                repairStopwatch.Stop();
+                _logger.LogInformation(
+                    "Pipeline timing: stage=llm_repair elapsed_ms={ElapsedMs} attempted={Attempted}",
+                    repairStopwatch.ElapsedMilliseconds,
+                    repairedIntent != null);
+
+                if (repairedIntent != null)
+                {
+                    var repairedValidation = _intentValidator.ValidateParsedIntent(repairedIntent, userQuery, previousIntent);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (repairedValidation.ValidatedIntent != null)
+                    {
+                        _logger.LogInformation("LLM self-repair fixed intent on retry.");
+                        rawIntent = repairedIntent;
+                        validation = repairedValidation;
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "LLM self-repair retry did not fix intent. clarification={Clarification}",
+                            repairedValidation.Clarification);
+                    }
+                }
+            }
+
             pipelineResult.Intent = validation.NormalizedIntent;
             pipelineResult.Confidence = validation.NormalizedIntent.Confidence;
             pipelineResult.Visualization = validation.NormalizedIntent.Visualization ?? validation.NormalizedIntent.VisualizationHint ?? "table";
@@ -213,6 +250,29 @@ public class NlSqlEngine
         }
 
         return pipelineResult;
+    }
+
+    private static bool ShouldAttemptRepair(QueryIntent rawIntent, ValidationResult validation)
+    {
+        if (validation.ValidatedIntent != null)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(validation.Clarification))
+            return false;
+
+        var rawKind = rawIntent.Kind?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(rawKind))
+            rawKind = QueryIntentKinds.Query;
+
+        if (!string.Equals(rawKind, QueryIntentKinds.Query, StringComparison.Ordinal))
+            return false;
+
+        return !string.IsNullOrWhiteSpace(rawIntent.Metric)
+               || rawIntent.Dimensions.Count > 0
+               || rawIntent.Filters.Count > 0
+               || rawIntent.DateRange != null
+               || rawIntent.Limit.HasValue
+               || rawIntent.Sort.Count > 0;
     }
 
     private static bool RequiresWriteAccess(string userQuery) =>

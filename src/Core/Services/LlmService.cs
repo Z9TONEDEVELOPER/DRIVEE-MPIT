@@ -137,6 +137,57 @@ public class LlmService
         return intent;
     }
 
+    public async Task<QueryIntent?> RepairIntentAsync(
+        string userQuery,
+        string systemPrompt,
+        QueryIntent previousAttempt,
+        string validationError,
+        IReadOnlyList<ChatTurn>? history = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(validationError))
+            return null;
+
+        var previousAttemptJson = JsonSerializer.Serialize(previousAttempt, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        });
+        var repair = new RepairContext(previousAttemptJson, validationError.Trim());
+
+        var provider = _settings.GetProvider();
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            QueryIntent repaired;
+            if (string.Equals(provider, LlmProviders.GigaChat, StringComparison.OrdinalIgnoreCase))
+            {
+                var authorizationKey = _settings.GetGigaChatAuthorizationKey();
+                if (string.IsNullOrWhiteSpace(authorizationKey))
+                    return null;
+
+                repaired = await InterpretWithGigaChatAsync(userQuery, systemPrompt, history, authorizationKey, cancellationToken, repair);
+            }
+            else
+            {
+                repaired = await InterpretWithLocalAsync(userQuery, systemPrompt, history, cancellationToken, repair);
+            }
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "LLM self-repair completed in {ElapsedMs} ms. provider={Provider}, kind={Kind}",
+                stopwatch.ElapsedMilliseconds,
+                provider,
+                repaired.Kind);
+            return repaired;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            stopwatch.Stop();
+            _logger.LogWarning(exception, "LLM self-repair failed after {ElapsedMs} ms.", stopwatch.ElapsedMilliseconds);
+            return null;
+        }
+    }
+
     private async Task<QueryIntent> InterpretWithLocalOrFallbackAsync(
         string userQuery,
         string systemPrompt,
@@ -184,7 +235,8 @@ public class LlmService
         string userQuery,
         string systemPrompt,
         IReadOnlyList<ChatTurn>? history,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RepairContext? repair = null)
     {
         using var llmScope = _metrics.EnterLlmQueue();
         if (!await _localLlmSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
@@ -193,7 +245,7 @@ public class LlmService
 
         try
         {
-            var payload = BuildLocalPayload(userQuery, systemPrompt, history);
+            var payload = BuildLocalPayload(userQuery, systemPrompt, history, repair);
             using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
             {
                 Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
@@ -260,7 +312,8 @@ public class LlmService
         string systemPrompt,
         IReadOnlyList<ChatTurn>? history,
         string authorizationKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RepairContext? repair = null)
     {
         using var llmScope = _metrics.EnterLlmQueue();
         if (!await _gigaChatSemaphore.WaitAsync(_llmQueueTimeout, cancellationToken))
@@ -278,6 +331,12 @@ public class LlmService
             }
 
             messages.Add(new { role = "user", content = userQuery });
+            if (repair != null)
+            {
+                messages.Add(new { role = "assistant", content = repair.PreviousAttemptJson });
+                messages.Add(new { role = "user", content = BuildRepairInstruction(repair) });
+            }
+
             var payload = new Dictionary<string, object?>
             {
                 ["model"] = _gigaChatModel,
@@ -417,7 +476,7 @@ public class LlmService
         return responseBody;
     }
 
-    private object BuildLocalPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history)
+    private object BuildLocalPayload(string userQuery, string systemPrompt, IReadOnlyList<ChatTurn>? history, RepairContext? repair = null)
     {
         var responseFormat = BuildResponseFormat(_localStructuredOutputMode);
 
@@ -427,7 +486,7 @@ public class LlmService
             {
                 ["model"] = _model,
                 ["system_prompt"] = systemPrompt,
-                ["input"] = BuildFlatInput(userQuery, history, _maxHistoryTurns)
+                ["input"] = BuildFlatInput(userQuery, history, _maxHistoryTurns, repair)
             };
 
             if (responseFormat != null)
@@ -444,6 +503,11 @@ public class LlmService
         }
 
         messages.Add(new { role = "user", content = userQuery });
+        if (repair != null)
+        {
+            messages.Add(new { role = "assistant", content = repair.PreviousAttemptJson });
+            messages.Add(new { role = "user", content = BuildRepairInstruction(repair) });
+        }
 
         var payload = new Dictionary<string, object?>
         {
@@ -458,6 +522,13 @@ public class LlmService
 
         return payload;
     }
+
+    private static string BuildRepairInstruction(RepairContext repair) =>
+        $"Previous JSON intent failed validation.\nValidation error: {repair.ValidationError}\n" +
+        "Return a corrected JSON object that strictly conforms to the schema and fixes this error. " +
+        "Use only keys allowed by the semantic layer. Output only valid JSON with no commentary.";
+
+    internal sealed record RepairContext(string PreviousAttemptJson, string ValidationError);
 
     private object? BuildResponseFormat(string mode)
     {
@@ -567,26 +638,40 @@ public class LlmService
          intent.Limit.HasValue ||
          intent.Periods?.Count > 0);
 
-    private static string BuildFlatInput(string userQuery, IReadOnlyList<ChatTurn>? history, int maxHistoryTurns)
+    private static string BuildFlatInput(string userQuery, IReadOnlyList<ChatTurn>? history, int maxHistoryTurns, RepairContext? repair = null)
     {
-        if (history == null || history.Count == 0 || maxHistoryTurns <= 0)
+        if ((history == null || history.Count == 0 || maxHistoryTurns <= 0) && repair == null)
             return userQuery;
 
         var builder = new StringBuilder();
-        builder.AppendLine("Conversation context:");
-
-        foreach (var turn in history.TakeLast(maxHistoryTurns))
+        if (history != null && maxHistoryTurns > 0 && history.Count > 0)
         {
-            builder
-                .Append("- ")
-                .Append(turn.Role)
-                .Append(": ")
-                .AppendLine(turn.Content);
+            builder.AppendLine("Conversation context:");
+            foreach (var turn in history.TakeLast(maxHistoryTurns))
+            {
+                builder
+                    .Append("- ")
+                    .Append(turn.Role)
+                    .Append(": ")
+                    .AppendLine(turn.Content);
+            }
+
+            builder.AppendLine();
         }
 
-        builder.AppendLine();
-        builder.Append("Current user query: ").Append(userQuery);
-        return builder.ToString();
+        builder.Append("Current user query: ").AppendLine(userQuery);
+
+        if (repair != null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Previous JSON attempt:");
+            builder.AppendLine(repair.PreviousAttemptJson);
+            builder.AppendLine();
+            builder.Append("Validation error: ").AppendLine(repair.ValidationError);
+            builder.AppendLine("Return a corrected JSON object that strictly conforms to the schema. Output only valid JSON with no commentary.");
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static int ReadBoundedInt(IConfiguration configuration, string key, int fallback, int min, int max) =>
