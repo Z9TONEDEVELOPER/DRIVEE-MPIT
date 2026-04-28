@@ -925,10 +925,10 @@ public class LlmService
 
 public static class PromptTemplates
 {
-    public static string SystemPrompt(SemanticLayer semanticLayer)
+    public static string SystemPrompt(SemanticLayer semanticLayer, IReadOnlyList<FewShotExample>? examples = null)
     {
         if (!bool.TryParse(Environment.GetEnvironmentVariable("NEXUS_DATA_SPACE_USE_LEGACY_PROMPT"), out var useLegacyPrompt) || !useLegacyPrompt)
-            return CompactPromptTemplates.SystemPrompt(semanticLayer);
+            return CompactPromptTemplates.SystemPrompt(semanticLayer, examples);
 
         var metrics = string.Join(Environment.NewLine, semanticLayer.Metrics.Select(metric =>
             $"- {metric.Key}: {metric.DisplayLabel}; aggregation={metric.Aggregation}; source={metric.Source}; date_column={metric.DateColumn}; synonyms=[{string.Join(", ", metric.Synonyms.Take(8))}]"));

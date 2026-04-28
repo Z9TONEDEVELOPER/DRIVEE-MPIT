@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using NexusDataSpace.Core.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace NexusDataSpace.Core.Services;
@@ -22,6 +24,9 @@ public class NlSqlEngine
     private readonly TenantContext _tenantContext;
     private readonly QueryLoadControl _loadControl;
     private readonly OperationalMetricsService _metrics;
+    private readonly IFewShotProvider _fewShotProvider;
+    private readonly IFewShotFeedbackStore _fewShotFeedbackStore;
+    private readonly int _fewShotMaxExamples;
     private readonly ILogger<NlSqlEngine> _logger;
 
     public NlSqlEngine(
@@ -35,6 +40,9 @@ public class NlSqlEngine
         TenantContext tenantContext,
         QueryLoadControl loadControl,
         OperationalMetricsService metrics,
+        IFewShotProvider fewShotProvider,
+        IFewShotFeedbackStore fewShotFeedbackStore,
+        IConfiguration configuration,
         ILogger<NlSqlEngine> logger)
     {
         _llmService = llmService;
@@ -47,7 +55,17 @@ public class NlSqlEngine
         _tenantContext = tenantContext;
         _loadControl = loadControl;
         _metrics = metrics;
+        _fewShotProvider = fewShotProvider;
+        _fewShotFeedbackStore = fewShotFeedbackStore;
+        _fewShotMaxExamples = ReadFewShotMax(configuration);
         _logger = logger;
+    }
+
+    private static int ReadFewShotMax(IConfiguration configuration)
+    {
+        if (int.TryParse(configuration["Llm:FewShotMaxExamples"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            return Math.Clamp(value, 0, 32);
+        return 6;
     }
 
     public async Task<PipelineResult> RunAsync(
@@ -91,10 +109,13 @@ public class NlSqlEngine
             _dataSources.EnsureActiveSourceReadyForAnalytics(effectiveCompanyId);
             cancellationToken.ThrowIfCancellationRequested();
 
+            var fewShotExamples = _fewShotMaxExamples > 0
+                ? _fewShotProvider.SelectFor(userQuery, _fewShotMaxExamples)
+                : Array.Empty<FewShotExample>();
             var llmStopwatch = Stopwatch.StartNew();
             var rawIntent = await _llmService.InterpretAsync(
                 userQuery,
-                PromptTemplates.SystemPrompt(_semanticLayer),
+                PromptTemplates.SystemPrompt(_semanticLayer, fewShotExamples),
                 history,
                 cancellationToken);
             llmStopwatch.Stop();
@@ -196,6 +217,25 @@ public class NlSqlEngine
 
     private static bool RequiresWriteAccess(string userQuery) =>
         !string.IsNullOrWhiteSpace(userQuery) && WriteIntentPattern.IsMatch(userQuery);
+
+    private void CaptureCorrectedIntentFeedback(int companyId, string userQuery, QueryIntent normalizedIntent)
+    {
+        if (string.IsNullOrWhiteSpace(userQuery))
+            return;
+
+        try
+        {
+            _fewShotFeedbackStore.Save(companyId, userQuery, normalizedIntent);
+            _logger.LogInformation(
+                "Captured corrected-intent feedback for few-shot bank. company_id={CompanyId}, metric={Metric}",
+                companyId,
+                normalizedIntent.Metric);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to capture corrected-intent feedback.");
+        }
+    }
 
     private static string BuildRateLimitMessage(TimeSpan retryAfter) =>
         $"Too many analytics requests. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} sec.";
@@ -303,6 +343,8 @@ public class NlSqlEngine
                 "SQL-запрос",
                 "SQL пересобран после ручного исправления интерпретации.",
                 pipelineResult.Sql));
+
+            CaptureCorrectedIntentFeedback(effectiveCompanyId, userQuery, validatedIntent.NormalizedIntent);
         }
         catch (Exception exception)
         {

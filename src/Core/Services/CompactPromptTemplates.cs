@@ -5,7 +5,7 @@ namespace NexusDataSpace.Core.Services;
 
 internal static class CompactPromptTemplates
 {
-    public static string SystemPrompt(SemanticLayer semanticLayer)
+    public static string SystemPrompt(SemanticLayer semanticLayer, IReadOnlyList<FewShotExample>? examples = null)
     {
         var metrics = string.Join(Environment.NewLine, semanticLayer.Metrics.Select(metric =>
             $"- {metric.Key}: agg={metric.Aggregation}; source={metric.Source}; date={metric.DateColumn}; dims={JoinKeys(metric.AllowedDimensions, 10)}; filters={JoinKeys(metric.AllowedFilters, 10)}"));
@@ -44,6 +44,18 @@ internal static class CompactPromptTemplates
         builder.AppendLine("{\"kind\":\"query|chat|clarify\",\"reply\":null,\"clarification\":null,\"intent\":\"metric_query|compare_periods\",\"metric\":null,\"aggregation\":null,\"dimensions\":[],\"filters\":[],\"date_range\":null,\"sort\":[],\"limit\":null,\"source\":null,\"comparison\":null,\"confidence\":0.0,\"explanation\":null}");
         builder.AppendLine("filter={\"field\":\"filter_key\",\"operator\":\"=|!=|in|not_in|>|>=|<|<=\",\"value\":\"...\"}");
         builder.AppendLine("date_range.type=today|yesterday|last_n_days|last_n_weeks|last_n_months|current_week|previous_week|current_month|previous_month|current_year|previous_year|absolute.");
+
+        if (examples != null && examples.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Examples (query -> intent JSON):");
+            foreach (var example in examples)
+            {
+                builder.Append("Q: ").AppendLine(example.Query);
+                builder.Append("A: ").AppendLine(example.IntentJson);
+            }
+        }
+
         return builder.ToString();
     }
 
