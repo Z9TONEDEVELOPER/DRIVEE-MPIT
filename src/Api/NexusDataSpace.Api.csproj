@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin-*/**;obj-*/**;.codex-build/**</DefaultItemExcludes>
     <UserSecretsId>034726ab-535e-460e-b556-d123ecc19f34</UserSecretsId>
   </PropertyGroup>
 

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>NexusDataSpace.Core</AssemblyName>
     <RootNamespace>NexusDataSpace.Core</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin-*/**;obj-*/**;.codex-build/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
   </PropertyGroup>

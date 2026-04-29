@@ -25,8 +25,10 @@ public class NlSqlEngine
     private readonly QueryLoadControl _loadControl;
     private readonly OperationalMetricsService _metrics;
     private readonly IFewShotProvider _fewShotProvider;
+    private readonly IFewShotRanker _fewShotRanker;
     private readonly IFewShotFeedbackStore _fewShotFeedbackStore;
     private readonly int _fewShotMaxExamples;
+    private readonly int _fewShotCandidateLimit;
     private readonly ILogger<NlSqlEngine> _logger;
 
     public NlSqlEngine(
@@ -41,6 +43,7 @@ public class NlSqlEngine
         QueryLoadControl loadControl,
         OperationalMetricsService metrics,
         IFewShotProvider fewShotProvider,
+        IFewShotRanker fewShotRanker,
         IFewShotFeedbackStore fewShotFeedbackStore,
         IConfiguration configuration,
         ILogger<NlSqlEngine> logger)
@@ -56,16 +59,25 @@ public class NlSqlEngine
         _loadControl = loadControl;
         _metrics = metrics;
         _fewShotProvider = fewShotProvider;
+        _fewShotRanker = fewShotRanker;
         _fewShotFeedbackStore = fewShotFeedbackStore;
-        _fewShotMaxExamples = ReadFewShotMax(configuration);
+        _fewShotMaxExamples = ReadBoundedInt(configuration, "Llm:FewShotMaxExamples", 6, 0, 32);
+        _fewShotCandidateLimit = Math.Max(
+            _fewShotMaxExamples,
+            ReadBoundedInt(configuration, "Llm:FewShotCandidateLimit", Math.Max(16, _fewShotMaxExamples), 0, 128));
         _logger = logger;
     }
 
-    private static int ReadFewShotMax(IConfiguration configuration)
+    private static int ReadBoundedInt(
+        IConfiguration configuration,
+        string key,
+        int fallback,
+        int min,
+        int max)
     {
-        if (int.TryParse(configuration["Llm:FewShotMaxExamples"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
-            return Math.Clamp(value, 0, 32);
-        return 6;
+        if (int.TryParse(configuration[key], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            return Math.Clamp(value, min, max);
+        return fallback;
     }
 
     public async Task<PipelineResult> RunAsync(
@@ -109,9 +121,21 @@ public class NlSqlEngine
             _dataSources.EnsureActiveSourceReadyForAnalytics(effectiveCompanyId);
             cancellationToken.ThrowIfCancellationRequested();
 
-            var fewShotExamples = _fewShotMaxExamples > 0
-                ? _fewShotProvider.SelectFor(userQuery, _fewShotMaxExamples)
-                : Array.Empty<FewShotExample>();
+            IReadOnlyList<FewShotExample> fewShotExamples = Array.Empty<FewShotExample>();
+            if (_fewShotMaxExamples > 0)
+            {
+                var fewShotCandidates = _fewShotProvider.SelectFor(userQuery, _fewShotCandidateLimit);
+                fewShotExamples = await _fewShotRanker.RankAsync(
+                    userQuery,
+                    fewShotCandidates,
+                    _fewShotMaxExamples,
+                    cancellationToken);
+                _logger.LogInformation(
+                    "Few-shot examples selected. selected={Selected}, candidates={Candidates}, ranker={Ranker}",
+                    fewShotExamples.Count,
+                    fewShotCandidates.Count,
+                    _fewShotRanker.GetType().Name);
+            }
             var systemPrompt = PromptTemplates.SystemPrompt(_semanticLayer, fewShotExamples);
             var llmStopwatch = Stopwatch.StartNew();
             var rawIntent = await _llmService.InterpretAsync(
